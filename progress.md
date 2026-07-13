@@ -77,6 +77,20 @@
   - `artifacts/screenshots/phase-3-desktop.png`
   - `artifacts/screenshots/phase-3-mobile.png`
 
+### Phase 4: LangGraph, project memory, context, and replanning
+- **Status:** complete
+- Actions taken:
+  - Added one LangGraph workflow spanning requirements, subject resolution, Route A, Access/Base, retrieval, planning, deterministic validation, review, bounded replan, and presentation.
+  - Added three native interrupt/resume confirmations backed by PostgreSQL checkpoints and stable namespaced thread identifiers.
+  - Added five project stores for trip state, trip events, explicit opt-in preferences, knowledge metadata, and normalized tool cache.
+  - Added minimal versioned ContextBuilder snapshots, content-free run metrics, and bounded strict Reviewer JSON validation.
+  - Proved rejection, provider failure, invalid model JSON, namespace isolation, preference deletion, day-2-only replanning, and the three-revision limit.
+  - Restarted the API after an interrupt and resumed the same PostgreSQL checkpoint successfully.
+  - Passed one real structured-output LLM smoke without logging configuration or response content.
+  - Passed `make verify-phase-4` across 13 static, fixture, security, Compose, persistence, live, and browser checks.
+- Evidence:
+  - `artifacts/phase-4-report.md`
+
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
@@ -127,12 +141,14 @@
 | 2026-07-14 | First Phase 3 gate stopped immediately on one long report string | 1 | Wrapped the string before any build or browser check ran |
 | 2026-07-14 | Phase 3 Compose/API passed and the UI generated Route B; Playwright's base-text assertion was ambiguous across selection and summary cards | 1 | Scoped all final assertions to the labelled timeline region |
 | 2026-07-14 | Parallel Playwright rerun passed behavior but two mobile workers intermittently could not open distinct screenshot paths | 1 | Set one Playwright worker so artifact writes are deterministic on this Windows Documents volume |
+| 2026-07-14 | Initial Phase 4 graph compilation treated `__interrupt__` as an application channel, which LangGraph reserves internally | 1 | Removing it from WorkflowState and reading returned interrupt metadata through a narrow typed projection |
+| 2026-07-14 | Phase 4 gate launch was accidentally bounded to one second and timed out before producing check output | 1 | Re-running the unchanged gate with a full acceptance time budget |
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 1 — project foundation |
-| Where am I going? | Phases 1–6, then `make verify-all` |
+| Where am I? | Phase 5 — RAG, complete Web flow, and exports |
+| Where am I going? | Phase 5, Phase 6, then `make verify-all` |
 | What's the goal? | Fully implement and verify all six repository phases |
 | What have I learned? | See `findings.md` |
-| What have I done? | Bootstrapped persistent planning and confirmed the active goal |
+| What have I done? | Completed and verified Phases 1–4; see the phase logs above |

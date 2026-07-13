@@ -4,7 +4,7 @@
 Read the complete required handoff chain, implement and verify all six project phases, and finish only when `make verify-all` passes or a genuine user-only blocker is documented.
 
 ## Current Phase
-Phase 4 — LangGraph, project memory, context, and replanning
+Phase 5 — RAG, complete Web flow, and exports
 
 ## Phases
 
@@ -33,16 +33,16 @@ Phase 4 — LangGraph, project memory, context, and replanning
 - **Status:** complete
 
 ### Phase 4: LangGraph, project memory, context, and replanning
-- [ ] Implement the Phase 4 handoff requirements
-- [ ] Run and fix `make verify-phase-4`
-- [ ] Commit the completed phase if Git identity is configured
-- **Status:** in_progress
+- [x] Implement the Phase 4 handoff requirements
+- [x] Run and fix `make verify-phase-4`
+- [x] Commit the completed phase if Git identity is configured
+- **Status:** complete
 
 ### Phase 5: RAG, complete Web flow, and exports
 - [ ] Implement the Phase 5 handoff requirements
 - [ ] Run and fix `make verify-phase-5`
 - [ ] Commit the completed phase if Git identity is configured
-- **Status:** pending
+- **Status:** in_progress
 
 ### Phase 6: Evaluation, hardening, documentation, and final acceptance
 - [ ] Implement the Phase 6 handoff requirements
@@ -108,6 +108,8 @@ Phase 4 — LangGraph, project memory, context, and replanning
 | First Phase 3 gate stopped at a single 103-character report string | 1 | Wrap the string and rerun the gate; no integration or external work had started |
 | Phase 3 E2E reached a correct Route B but an assertion matched the selected base in both its control and summary | 1 | Scope the assertion to the Route B region and rerun browser acceptance |
 | Parallel mobile E2E intermittently failed opening distinct screenshot files in the Windows Documents workspace | 1 | Serialize Playwright workers for deterministic artifact writes across desktop/mobile projects |
+| First Phase 4 static/test pass exposed LangGraph's reserved `__interrupt__` channel, generic inference gaps, and style-only findings | 1 | Keep interrupt metadata outside the declared graph state, add narrow typed result casts, and apply scoped formatting fixes |
+| First Phase 4 gate wrapper was given a one-second process timeout and ended before a check ran | 1 | Relaunch with the gate's normal build, restart, live-smoke, and browser time budget |
 
 ## Guardrails
 - Never expose `.env`, secrets, tokens, headers, cookies, or signed MCP URLs.

@@ -163,6 +163,54 @@ PHASE_3 = (
     Check("Access, map, and timeline E2E", ("pnpm", "test:e2e"), "e2e"),
 )
 
+PHASE_4 = (
+    Check("Python lint", ("uv", "run", "ruff", "check", "."), "static"),
+    Check("Python strict types", ("uv", "run", "mypy"), "static"),
+    Check("Web lint", ("pnpm", "lint"), "static"),
+    Check("Web strict types", ("pnpm", "typecheck"), "static"),
+    Check(
+        "LangGraph, context, review, and memory fixtures",
+        (
+            "uv",
+            "run",
+            "pytest",
+            "tests/unit/test_phase4_graph.py",
+            "tests/unit/test_phase4_context_review.py",
+            "tests/unit/test_phase4_memory.py",
+        ),
+        "fixture",
+    ),
+    Check("Web unit regression", ("pnpm", "test"), "fixture"),
+    Check("Repository secret scan", (sys.executable, "scripts/check_secrets.py"), "security"),
+    Check("Build and start full stack", ("docker", "compose", "up", "-d", "--build"), "compose"),
+    Check("Four-service health", (sys.executable, "scripts/wait_compose.py"), "compose"),
+    Check(
+        "Five PostgreSQL project stores",
+        (
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "api",
+            "python",
+            "-m",
+            "pilgrimage_agent.smoke.phase4_memory",
+        ),
+        "integration",
+    ),
+    Check(
+        "Checkpoint resume after API restart",
+        ("uv", "run", "python", "scripts/phase4_api_smoke.py"),
+        "integration",
+    ),
+    Check(
+        "One real structured-output LLM smoke",
+        ("uv", "run", "python", "scripts/live_llm_smoke.py"),
+        "live",
+    ),
+    Check("Desktop/mobile browser regression", ("pnpm", "test:e2e"), "e2e"),
+)
+
 
 def redact(text: str) -> str:
     """Remove likely credential-bearing lines before report/log output."""
@@ -190,7 +238,7 @@ def resolve_command(command: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def run_phase(phase: int) -> bool:
-    phase_checks = {1: PHASE_1, 2: PHASE_2, 3: PHASE_3}.get(phase)
+    phase_checks = {1: PHASE_1, 2: PHASE_2, 3: PHASE_3, 4: PHASE_4}.get(phase)
     if phase_checks is None:
         ARTIFACTS.mkdir(parents=True, exist_ok=True)
         path = ARTIFACTS / f"phase-{phase}-report.md"
@@ -264,6 +312,8 @@ def run_phase(phase: int) -> bool:
                 1: "- Live external API evidence: not part of Phase 1; no live calls were made.",
                 2: "- Live external API evidence: the separately labelled live smoke row; "
                 "each configured provider is called at most once and SearchAPI at most once.",
+                4: "- Live external API evidence: one separately labelled, structured-output "
+                "LLM smoke; no configuration or response body is logged.",
             }.get(
                 phase,
                 "- Live external API evidence: no additional live calls were required "

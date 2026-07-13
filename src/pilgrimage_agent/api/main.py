@@ -1,13 +1,29 @@
 """HTTP API entrypoint."""
 
-from typing import Literal
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from hashlib import sha256
+from typing import Literal, cast
+from uuid import UUID
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.types import Command, Interrupt
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from pilgrimage_agent import __version__
+from pilgrimage_agent.agent.graph import WorkflowGraph, WorkflowState, build_workflow
+from pilgrimage_agent.agent.schemas import (
+    ConfirmationRequest,
+    ResumeWorkflowRequest,
+    StartWorkflowRequest,
+    WorkflowResponse,
+    WorkflowStatus,
+)
 from pilgrimage_agent.config import get_settings
 from pilgrimage_agent.db import session_scope
 from pilgrimage_agent.domain.models import (
@@ -18,6 +34,8 @@ from pilgrimage_agent.domain.models import (
     SubjectSearchResult,
 )
 from pilgrimage_agent.domain.planning import PlanningOptions, RouteBPlan, RouteBRequest
+from pilgrimage_agent.memory.schemas import StoredTrip
+from pilgrimage_agent.memory.store import SqlProjectStore
 from pilgrimage_agent.planning.demo import fixture_route_a, plan_demo_route_b, planning_options
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.points import build_route_a
@@ -44,6 +62,78 @@ app = FastAPI(
     version=__version__,
     description="Read-only planning API; booking and payment are intentionally unsupported.",
 )
+
+
+def _checkpoint_url() -> str:
+    """Convert the application SQLAlchemy URL to psycopg without exposing it."""
+
+    return (
+        get_settings()
+        .database_url.get_secret_value()
+        .replace("postgresql+asyncpg://", "postgresql://", 1)
+    )
+
+
+def _checkpoint_thread(owner_user_id: str, thread_id: str, trip_id: UUID) -> str:
+    namespace = f"{owner_user_id}\x1f{thread_id}\x1f{trip_id}"
+    return sha256(namespace.encode()).hexdigest()
+
+
+@asynccontextmanager
+async def _workflow_runtime() -> AsyncIterator[tuple[WorkflowGraph, SqlProjectStore]]:
+    """Open bounded checkpoint/store resources for one HTTP operation."""
+
+    database_url = get_settings().database_url.get_secret_value()
+    engine = create_async_engine(database_url, pool_pre_ping=True)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with AsyncPostgresSaver.from_conn_string(_checkpoint_url()) as checkpointer:
+            await checkpointer.setup()
+            yield build_workflow(checkpointer), SqlProjectStore(sessions)
+    finally:
+        await engine.dispose()
+
+
+def _workflow_response(result: WorkflowState) -> WorkflowResponse:
+    raw_result = cast(dict[str, object], result)
+    raw_interrupts = cast(tuple[Interrupt, ...], raw_result.get("__interrupt__", ()))
+    pending: ConfirmationRequest | None = None
+    if raw_interrupts:
+        first = next(iter(raw_interrupts))
+        if isinstance(first, Interrupt):
+            pending = ConfirmationRequest.model_validate(first.value)
+    status = WorkflowStatus(result.get("status", WorkflowStatus.RUNNING.value))
+    if pending is not None:
+        status = WorkflowStatus.WAITING
+    return WorkflowResponse(
+        trip_id=UUID(result["trip_id"]),
+        thread_id=result["thread_id"],
+        status=status,
+        phase=result.get("phase", "unknown"),
+        pending_confirmation=pending,
+        revision_count=result.get("revision_count", 0),
+        warnings=result.get("warnings", ()),
+        plan_day_hashes=result.get("plan_day_hashes", ()),
+    )
+
+
+async def _save_workflow(
+    store: SqlProjectStore, owner_user_id: str, response: WorkflowResponse
+) -> None:
+    await store.save_trip(
+        StoredTrip(
+            trip_id=response.trip_id,
+            owner_user_id=owner_user_id,
+            thread_id=response.thread_id,
+            state=response.model_dump(mode="json"),
+        )
+    )
+    await store.append_event(
+        owner_user_id,
+        response.trip_id,
+        "workflow_transition",
+        {"phase": response.phase, "status": response.status.value},
+    )
 
 
 @app.exception_handler(ProviderError)
@@ -128,3 +218,58 @@ async def get_planning_options() -> PlanningOptions:
 async def route_b(subject_id: str, request: RouteBRequest) -> RouteBPlan:
     route = await fixture_route_a(subject_id)
     return await plan_demo_route_b(route, request)
+
+
+@app.post("/api/workflows", response_model=WorkflowResponse)
+async def start_workflow(request: StartWorkflowRequest) -> WorkflowResponse:
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": _checkpoint_thread(
+                request.owner_user_id, request.thread_id, request.trip_id
+            )
+        }
+    }
+    initial: WorkflowState = {
+        "owner_user_id": request.owner_user_id,
+        "thread_id": request.thread_id,
+        "trip_id": str(request.trip_id),
+        "request_summary": request.request_summary,
+    }
+    async with _workflow_runtime() as (graph, store):
+        result = cast(WorkflowState, await graph.ainvoke(initial, config))
+        response = _workflow_response(result)
+        await _save_workflow(store, request.owner_user_id, response)
+    return response
+
+
+@app.post("/api/workflows/{trip_id}/resume", response_model=WorkflowResponse)
+async def resume_workflow(trip_id: UUID, request: ResumeWorkflowRequest) -> WorkflowResponse:
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": _checkpoint_thread(request.owner_user_id, request.thread_id, trip_id)
+        }
+    }
+    async with _workflow_runtime() as (graph, store):
+        trip = await store.get_trip(request.owner_user_id, request.thread_id, trip_id)
+        if trip is None:
+            raise HTTPException(status_code=404, detail="Workflow was not found in this namespace")
+        result = cast(
+            WorkflowState,
+            await graph.ainvoke(Command(resume=request.decision.model_dump(mode="json")), config),
+        )
+        response = _workflow_response(result)
+        await _save_workflow(store, request.owner_user_id, response)
+    return response
+
+
+@app.get("/api/workflows/{trip_id}", response_model=WorkflowResponse)
+async def get_workflow(
+    trip_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    thread_id: str = Query(min_length=1, max_length=120),
+) -> WorkflowResponse:
+    async with _workflow_runtime() as (_graph, store):
+        trip = await store.get_trip(owner_user_id, thread_id, trip_id)
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Workflow was not found in this namespace")
+    return WorkflowResponse.model_validate(trip.state)
