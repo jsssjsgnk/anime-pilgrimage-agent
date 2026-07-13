@@ -82,6 +82,9 @@
 - openrouteservice matrix official documentation: `https://giscience.github.io/openrouteservice/api-reference/endpoints/matrix/`
 
 ## Visual/Browser Findings
+- Final `make verify-all` passes all six independently scoped phase gates. Historical gates now run only the browser specs available in that phase; Phase 5 and Phase 6 run the full seeded eight-case suite.
+- Phase 6 clean acceptance proved the four-service stack can rebuild from empty project volumes, apply all migrations, run the demo, survive a PostgreSQL restart, preserve data and namespace isolation, and clean fixed fixtures.
+- Final security metrics report zero secret exposures, zero kickoff/conversation-body exposures, nine allowlisted MCP tools, and zero forbidden tools. License inventory covers 114 Python and 284 Node records with zero denied licenses.
 - Phase 5 post-fix screenshots show the complete five-stage flow with all three days preserved after a Day 2-only revision, a visible 5 km trip-wide cap, a separately labelled 3 km Day 2 local constraint, source/date/authority evidence, and export controls on both desktop and mobile.
 - Interactive browser inspection caught a whole-plan recomputation that the initial screenshots did not make obvious; the final E2E now records Day 1/3 text before revision and requires exact stability afterward.
 - The official multilingual E5 snapshot works offline when SentenceTransformers 4.x explicitly composes the Transformer and mean-pooling modules; the smoke proves 384 dimensions, unit norm, and multilingual retrieval ordering.

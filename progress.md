@@ -161,11 +161,25 @@
   - `artifacts/plan-export-schema.json`, `artifacts/geojson-export-schema.json`
   - `artifacts/screenshots/phase-5-desktop.png`, `artifacts/screenshots/phase-5-mobile.png`
 
+### Phase 6: Evaluation, hardening, documentation, and final acceptance
+- **Status:** complete
+- Actions taken:
+  - Rewrote the operator README and added accepted ADRs, reproducible demo instructions, known limitations, and resume/interview notes.
+  - Added locked Python/Node license inventory, production-bundle secret/conversation scanning, MCP forbidden-tool metrics, and final system metrics.
+  - Added explicit timeout/429/partial/invalid-model regression replay and a scoped PostgreSQL restart smoke that proves persistence and namespace isolation.
+  - Added clean acceptance that removes only project volumes, rebuilds all four services, migrates an empty database, seeds RAG, runs the complete API/browser demo, and cleans fixtures.
+  - Passed `make verify-phase-6` across 23 checks, then passed `make verify-all` across all six phase gates.
+  - Used the third and final budgeted SearchAPI acceptance call during `verify-all`; no further live provider rerun is permitted without a new budget.
+- Evidence:
+  - `artifacts/phase-6-report.md`
+  - `artifacts/final-verification.md` (Status: PASS)
+  - `artifacts/system-metrics.json`, `artifacts/security-metrics.json`, `artifacts/dependency-licenses.json`
+
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 6 — evaluation, hardening, documentation, and final acceptance |
-| Where am I going? | Phase 6, then `make verify-all` |
+| Where am I? | Complete — all six phases and final acceptance passed |
+| Where am I going? | Handoff complete |
 | What's the goal? | Fully implement and verify all six repository phases |
 | What have I learned? | See `findings.md` |
-| What have I done? | Completed and verified Phases 1–5; see the phase logs above |
+| What have I done? | Completed, verified, and committed Phases 1–5; Phase 6/final acceptance is ready for its focused commit |

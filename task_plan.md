@@ -4,7 +4,7 @@
 Read the complete required handoff chain, implement and verify all six project phases, and finish only when `make verify-all` passes or a genuine user-only blocker is documented.
 
 ## Current Phase
-Phase 6 — evaluation, hardening, documentation, and final acceptance
+Complete — all six phases and `make verify-all` passed
 
 ## Phases
 
@@ -45,11 +45,11 @@ Phase 6 — evaluation, hardening, documentation, and final acceptance
 - **Status:** complete
 
 ### Phase 6: Evaluation, hardening, documentation, and final acceptance
-- [ ] Implement the Phase 6 handoff requirements
-- [ ] Run and fix `make verify-phase-6`
-- [ ] Run and fix `make verify-all`
-- [ ] Commit the completed phase if Git identity is configured
-- **Status:** in_progress
+- [x] Implement the Phase 6 handoff requirements
+- [x] Run and fix `make verify-phase-6`
+- [x] Run and fix `make verify-all`
+- [x] Commit the completed phase if Git identity is configured
+- **Status:** complete
 
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
@@ -122,6 +122,10 @@ Phase 6 — evaluation, hardening, documentation, and final acceptance
 | A bounded retry could not fetch one missing E5 packaging metadata file | 3 | Avoid that fragile metadata by explicitly composing Transformer plus mean pooling; real offline smoke passed |
 | First Phase 5 production smoke could not create `.cache` as the non-root API user | 1 | Add an app-owned BM25 directory backed by the dedicated RAG index Docker volume |
 | Two accidental one-second Phase 5 gate wrappers timed out before useful work | 2 | Relaunch once with the normal full acceptance budget |
+| First PostgreSQL recovery probe waited for `database=ok` without enabling the health endpoint's database check | 1 | Request `/health?check_database=true`; persistence and isolation then passed after restart |
+| Initial Phase 6 license check used the Conda interpreter and saw only four bootstrap packages | 1 | Run the audit through locked `uv run`; final inventory covers 114 Python and 284 Node records |
+| First aggregate wrapper had a one-second timeout and stopped in Phase 1 before live calls | 1 | Relaunch with the full aggregate acceptance budget |
+| First aggregate Phase 1 browser check accidentally included the Phase 5 evidence spec after the clean corpus was removed | 1 | Scope historical phase browser gates to their own feature specs; Phase 5/6 retain the full seeded suite |
 
 ## Guardrails
 - Never expose `.env`, secrets, tokens, headers, cookies, or signed MCP URLs.

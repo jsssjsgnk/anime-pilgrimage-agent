@@ -38,9 +38,11 @@ flowchart TD
     MCP --> EXT["Bangumi / Points / ORS / Weather / SearchAPI"]
     GRAPH --> DB["PostgreSQL + pgvector"]
     API --> DB
+    API --> HYBRID["E5 + persistent bm25s + RRF"]
+    HYBRID --> DB
 ```
 
-Docker Compose 至少包含 `web`、`api`、`mcp-tools`、`postgres`。MCP 服务仅在内部网络开放；前端不能直接持有外部 API Key。
+Docker Compose 包含 `web`、`api`、`mcp-tools`、`postgres`。MCP 服务仅在内部网络开放；前端不能直接持有外部 API Key。PostgreSQL 与 BM25 分别使用项目命名 volume，API 镜像以非 root 用户写入显式授权的索引目录。
 
 ## 推荐目录
 
@@ -114,3 +116,5 @@ KnowledgeRetriever
 每个 Provider 都必须有真实实现、Fixture/Mock、统一错误、超时、有限重试、缓存、Provenance 和契约测试。
 
 RAG 不能替代 Provider 的结构化实时数据。摄取、测试资料搜索、索引、检索、引用、权限和评估以 `docs/09_RAG_SPEC.md` 为唯一实现规格。
+
+实现后的边界决策记录在 `docs/adr/0001-provider-and-data-boundaries.md` 与 `docs/adr/0002-agent-memory-and-rag.md`。
