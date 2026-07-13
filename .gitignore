@@ -16,6 +16,7 @@ htmlcov/
 node_modules/
 dist/
 playwright-report/
+artifacts/playwright-results/
 test-results/
 
 # Local runtime data

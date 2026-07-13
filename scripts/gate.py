@@ -68,6 +68,72 @@ PHASE_1 = (
     Check("Desktop/mobile browser shell", ("pnpm", "test:e2e"), "e2e"),
 )
 
+PHASE_2 = (
+    Check("Python lint", ("uv", "run", "ruff", "check", "."), "static"),
+    Check("Python strict types", ("uv", "run", "mypy"), "static"),
+    Check("Web lint", ("pnpm", "lint"), "static"),
+    Check("Web strict types", ("pnpm", "typecheck"), "static"),
+    Check(
+        "Provider fixture and failure contracts",
+        (
+            "uv",
+            "run",
+            "pytest",
+            "tests/contract/test_phase2_providers.py",
+            "tests/unit",
+            "--cov=pilgrimage_agent",
+            "--cov-report=term-missing",
+        ),
+        "fixture",
+    ),
+    Check("Web unit tests", ("pnpm", "test"), "fixture"),
+    Check("Repository secret scan", (sys.executable, "scripts/check_secrets.py"), "security"),
+    Check("Build and start full stack", ("docker", "compose", "up", "-d", "--build"), "compose"),
+    Check("Four-service health", (sys.executable, "scripts/wait_compose.py"), "compose"),
+    Check(
+        "MCP initialize, allowlist, and schemas",
+        (
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "api",
+            "python",
+            "-m",
+            "pilgrimage_agent.smoke.mcp",
+            "http://mcp-tools:8001/mcp",
+        ),
+        "integration",
+    ),
+    Check(
+        "MCP schema snapshot",
+        (
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "api",
+            "python",
+            "-m",
+            "pilgrimage_agent.smoke.mcp",
+            "http://mcp-tools:8001/mcp",
+            "--snapshot",
+        ),
+        "integration",
+    ),
+    Check(
+        "Subject confirmation and Route A",
+        (sys.executable, "scripts/phase2_api_smoke.py"),
+        "integration",
+    ),
+    Check(
+        "Live read-only provider smoke",
+        ("uv", "run", "python", "scripts/live_provider_smoke.py"),
+        "live",
+    ),
+    Check("Subject confirmation map E2E", ("pnpm", "test:e2e"), "e2e"),
+)
+
 
 def redact(text: str) -> str:
     """Remove likely credential-bearing lines before report/log output."""
@@ -95,7 +161,8 @@ def resolve_command(command: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def run_phase(phase: int) -> bool:
-    if phase != 1:
+    phase_checks = {1: PHASE_1, 2: PHASE_2}.get(phase)
+    if phase_checks is None:
         ARTIFACTS.mkdir(parents=True, exist_ok=True)
         path = ARTIFACTS / f"phase-{phase}-report.md"
         path.write_text(
@@ -106,9 +173,10 @@ def run_phase(phase: int) -> bool:
         return False
 
     results: list[tuple[Check, int, str]] = []
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
     command_env = os.environ.copy()
     command_env["COMPOSE_BAKE"] = "false"
-    for check in PHASE_1:
+    for check in phase_checks:
         print(f"\n=== {check.name} ===", flush=True)
         try:
             completed = subprocess.run(
@@ -126,13 +194,15 @@ def run_phase(phase: int) -> bool:
             output = redact(str(error))
         print(output[-4000:] if output else "(no output)")
         results.append((check, code, output))
+        if phase == 2 and check.name == "MCP schema snapshot" and code == 0:
+            (ARTIFACTS / "mcp-tools-schema.json").write_text(output + "\n", encoding="utf-8")
         if code != 0:
             break
 
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
-    report = ARTIFACTS / "phase-1-report.md"
+    report = ARTIFACTS / f"phase-{phase}-report.md"
     lines = [
-        "# Phase 1 verification",
+        f"# Phase {phase} verification",
         "",
         f"Generated: {datetime.now(UTC).isoformat()}",
         "",
@@ -143,8 +213,8 @@ def run_phase(phase: int) -> bool:
     ]
     for check, code, _ in results:
         lines.append(f"| {check.name} | {check.category} | {'PASS' if code == 0 else 'FAIL'} |")
-    if len(results) < len(PHASE_1):
-        for check in PHASE_1[len(results) :]:
+    if len(results) < len(phase_checks):
+        for check in phase_checks[len(results) :]:
             lines.append(f"| {check.name} | {check.category} | NOT RUN |")
     lines.extend(["", "## Failure details", ""])
     failures = [(check, output) for check, code, output in results if code != 0]
@@ -161,12 +231,17 @@ def run_phase(phase: int) -> bool:
             "- Fixture/unit evidence: Python and Web unit/contract checks above.",
             "- Browser E2E evidence: Playwright report and desktop/mobile screenshots "
             "under `artifacts/`.",
-            "- Live external API evidence: not part of Phase 1; no live calls were made.",
+            (
+                "- Live external API evidence: not part of Phase 1; no live calls were made."
+                if phase == 1
+                else "- Live external API evidence: the separately labelled live smoke row; "
+                "each configured provider is called at most once and SearchAPI at most once."
+            ),
         ]
     )
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    passed = len(results) == len(PHASE_1) and not failures
-    print(f"\nPhase 1 {'passed' if passed else 'failed'}; report: {report}")
+    passed = len(results) == len(phase_checks) and not failures
+    print(f"\nPhase {phase} {'passed' if passed else 'failed'}; report: {report}")
     return passed
 
 

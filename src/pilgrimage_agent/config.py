@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     searchapi_api_key: SecretStr | None = Field(default=None, alias="SEARCHAPI_API_KEY")
     provider_timeout_seconds: float = 10.0
     provider_max_attempts: int = 3
+    provider_mode: Literal["fixture", "live"] = "fixture"
 
     def capability_status(self) -> dict[str, bool]:
         """Return presence flags only; values never leave the server."""

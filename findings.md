@@ -10,6 +10,12 @@
 - Use the dedicated Conda environment and repository Docker Compose resources only.
 
 ## Research Findings
+- Official Bangumi API documentation (OAS dated 2026-06-25) exposes read-only subject discovery through `POST /v0/search/subjects` and detail lookup through `GET /v0/subjects/{subject_id}`; the implementation will exclude all documented write endpoints and send the configured User-Agent.
+- Official openrouteservice documentation defines direction coordinates as `[longitude, latitude]`, returns deterministic distance in metres and duration in seconds, and supports matrix sources/destinations by coordinate index.
+- Official Open-Meteo documentation exposes `GET /v1/forecast`, requires WGS84 latitude/longitude, returns seven days by default and at most sixteen forecast days, and can resolve timestamps with `timezone=auto`; requests beyond that horizon must be reported as unknown/out-of-range rather than invented.
+- Official SearchAPI Google Flights documentation accepts a bearer token in the Authorization header and returns structured flight options. The provider will keep the token out of URLs/logs, expose discovery only, cap live smoke calls, and never follow booking tokens or create purchases.
+- The current official SearchAPI response schema separates each airport's `date` and `time` fields (rather than returning one combined timestamp), and names the first-class request value `first_class`. The real provider now combines those fields deterministically and maps the internal enum explicitly.
+- No official public Anitabi API, terms, or robots guidance was discoverable from the official-domain search. The legally safe Phase 2 baseline therefore remains the handoff-authorized imported JSON/GeoJSON provider plus fixtures, with no scraping or access-control bypass.
 - The repository has no existing planning files at task start; `START_HERE.md` and root `AGENTS.md` are present.
 - The Codex task already has an active goal matching the user request.
 - `START_HERE.md` requires the nine documents under `docs/01_...` through `docs/09_...`, in order, plus `AGENTS.md` first.
@@ -44,6 +50,8 @@
 | Include GNU Make in the dedicated Conda environment | The Windows host lacks `make`, while all mandatory gates are Make targets; keeping it in the authorized environment preserves isolation |
 | Use a calm editorial atlas design with warm canvas, deep teal primary, vermilion route accent, system fonts, and semantic status tokens | Fits a trustworthy travel-planning workspace and keeps multilingual rendering local and fast |
 | Persist the UI rules in `design-system/MASTER.md` manually | The UI/UX skill generator is not packaged in this installation, but its full written accessibility/responsive guidance is available |
+| Use the imported pilgrimage-point provider instead of Anitabi network access | Public programmatic access is not clearly authorized; imported user/project-owned data meets the handoff without scraping |
+| Authenticate SearchAPI with a server-side bearer header | Its official documentation supports this and it avoids placing the API key in request URLs or logs |
 
 ## Issues Encountered
 | Issue | Resolution |
@@ -54,8 +62,15 @@
 ## Resources
 - `START_HERE.md`
 - `AGENTS.md`
+- Bangumi official API: `https://bangumi.github.io/api/`
+- openrouteservice official API reference: `https://giscience.github.io/openrouteservice/api-reference/`
+- Open-Meteo official forecast documentation: `https://open-meteo.com/en/docs`
+- SearchAPI official Google Flights documentation: `https://www.searchapi.io/docs/google-flights-api`
 
 ## Visual/Browser Findings
+- Phase 2 desktop and Pixel 7 screenshots show a clean confirmation-to-Route-A flow: the candidate card is visibly selected, the three-point map/list relationship is clear, sources have 44px link targets, and neither viewport has unintended horizontal overflow.
+- In-app browser semantics confirm Route A is absent before explicit confirmation, the selected subject button becomes pressed, the map is labelled with its point count, and all three normalized points expose distinct source links.
+- Phase 2 gate passed all 14 checks. The MCP snapshot contains exactly nine read-only tools, fixture/failure contracts cover success, empty, 429, timeout, and invalid JSON, and the final live run passed Bangumi, openrouteservice, Open-Meteo, and SearchAPI with one request each.
 - The live Compose Web renders with correct semantic landmarks, sequential headings, skip link, labelled textbox, a unique primary action, visible no-booking/no-payment boundary, four-step progress navigation, and source/uncertainty promises.
 - In-app browser interaction confirmed exactly one “整理旅行条件” button and one visible post-submit message stating that critical choices will not be silently confirmed.
 - The desktop visual uses the persisted warm editorial atlas system: high-contrast deep teal/charcoal, large serif display title, restrained route accent, bordered progress cells, and a clear request-card/verification-principles hierarchy.

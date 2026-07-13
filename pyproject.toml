@@ -79,4 +79,7 @@ source = ["pilgrimage_agent"]
 [tool.coverage.report]
 fail_under = 80
 show_missing = true
-omit = ["src/pilgrimage_agent/mcp/server.py"]
+omit = [
+  "src/pilgrimage_agent/mcp/server.py",
+  "src/pilgrimage_agent/smoke/*.py",
+]

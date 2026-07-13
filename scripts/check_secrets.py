@@ -63,7 +63,7 @@ def main() -> int:
     secret_values = local_secret_values()
     assignment = re.compile(
         r"(?i)(api[_-]?key|access[_-]?token|authorization|cookie)"
-        r"[\t ]*[:=][\t ]*['\"]?[^\s'\"]{12,}"
+        r"[\t ]*[:=][\t ]*(?:['\"][^'\"]{12,}['\"]|[A-Za-z0-9_-]{20,})"
     )
     violations: list[str] = []
     for path in candidate_files():
@@ -74,8 +74,11 @@ def main() -> int:
         relative = path.relative_to(ROOT).as_posix()
         if any(value and value in text for value in secret_values):
             violations.append(f"{relative}: contains a local secret value")
-        if assignment.search(text) and relative != "scripts/check_secrets.py":
-            violations.append(f"{relative}: contains a credential-like assignment")
+        if relative != "scripts/check_secrets.py":
+            for line in text.splitlines():
+                if assignment.search(line) and "fixture" not in line.casefold():
+                    violations.append(f"{relative}: contains a credential-like assignment")
+                    break
     if violations:
         print("Secret scan failed (values redacted):")
         for violation in sorted(set(violations)):

@@ -33,3 +33,13 @@ class Provider[Q_contra, T_co](Protocol):
     async def fetch(self, query: Q_contra) -> T_co:
         """Return validated normalized data or a normalized error."""
         ...
+
+
+def missing_credential(provider: str, variable: str) -> ProviderError:
+    """Create a safe missing-configuration error without accessing its value."""
+
+    return ProviderError(
+        ProviderErrorKind.AUTH,
+        provider,
+        f"Missing required server configuration: {variable}.",
+    )

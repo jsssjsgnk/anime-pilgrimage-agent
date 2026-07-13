@@ -1,0 +1,38 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [139.66792, 35.66161]},
+      "properties": {
+        "subject_id": "328609",
+        "name": "下北沢SHELTER周边",
+        "episode_refs": ["第8话"],
+        "confidence": "community",
+        "source_url": "https://www.city.setagaya.lg.jp/"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [139.66842, 35.66213]},
+      "properties": {
+        "subject_id": "328609",
+        "name": "下北泽站东口",
+        "episode_refs": ["第1话"],
+        "confidence": "community",
+        "source_url": "https://www.odakyu.jp/station/shimo_kitazawa/"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [139.67103, 35.66317]},
+      "properties": {
+        "subject_id": "328609",
+        "name": "下北泽一番街",
+        "episode_refs": ["第2话"],
+        "confidence": "community",
+        "source_url": "https://www.shimokita1ban.com/"
+      }
+    }
+  ]
+}

@@ -1,11 +1,21 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { App } from "../src/App";
 
+function renderApp() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <App />
+    </QueryClientProvider>,
+  );
+}
+
 describe("App", () => {
   it("explains safety boundaries and provides a labelled mixed-initiative input", () => {
-    render(<App />);
+    renderApp();
 
     expect(screen.getByText("只读规划 · 不预订 · 不付款")).toBeInTheDocument();
     expect(screen.getByLabelText("旅行想法")).toHaveValue(
@@ -14,7 +24,7 @@ describe("App", () => {
   });
 
   it("acknowledges input without silently confirming key choices", () => {
-    render(<App />);
+    renderApp();
 
     fireEvent.click(screen.getByRole("button", { name: /整理旅行条件/ }));
     expect(screen.getByText(/不会静默确认关键选择/)).toBeInTheDocument();
