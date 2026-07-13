@@ -1,0 +1,82 @@
+[project]
+name = "anime-pilgrimage-agent"
+version = "0.1.0"
+description = "Verifiable, mixed-initiative anime pilgrimage travel planner"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "alembic>=1.15,<2",
+  "asyncpg>=0.30,<1",
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "langgraph>=0.4,<1",
+  "mcp>=1.9,<2",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.9,<3",
+  "sqlalchemy>=2.0,<3",
+  "tenacity>=9,<10",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "hypothesis>=6.130,<7",
+  "mypy>=1.15,<2",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.26,<1",
+  "pytest-cov>=6,<7",
+  "respx>=0.22,<1",
+  "ruff>=0.11,<1",
+]
+rag = [
+  "bm25s>=0.2.13,<1",
+  "numpy>=2.2,<3",
+  "pypdf>=5.4,<6",
+  "sentence-transformers>=4,<6",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pilgrimage_agent"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["S310", "S603", "S607"]
+"src/pilgrimage_agent/mcp/server.py" = ["S104"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+exclude = ["alembic/versions"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config -ra"
+testpaths = ["tests"]
+markers = [
+  "live: read-only tests that call configured external services",
+  "e2e: browser or full-stack tests",
+  "integration: tests that require PostgreSQL or multiple services",
+]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+branch = true
+source = ["pilgrimage_agent"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+omit = ["src/pilgrimage_agent/mcp/server.py"]

@@ -1,0 +1,14 @@
+{
+  "name": "anime-pilgrimage-agent",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "dev": "pnpm --filter @pilgrimage/web dev",
+    "build": "pnpm --filter @pilgrimage/web build",
+    "lint": "pnpm --filter @pilgrimage/web lint",
+    "typecheck": "pnpm --filter @pilgrimage/web typecheck",
+    "test": "pnpm --filter @pilgrimage/web test",
+    "test:e2e": "pnpm --filter @pilgrimage/web test:e2e"
+  }
+}
+
