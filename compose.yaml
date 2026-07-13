@@ -27,6 +27,9 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://pilgrimage:pilgrimage@postgres:5432/pilgrimage
+      RAG_BM25_INDEX_DIR: /app/data/rag-bm25
+    volumes:
+      - pilgrimage-rag-index:/app/data/rag-bm25
     command: ["sh", "-c", "alembic upgrade head && uvicorn pilgrimage_agent.api.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
@@ -78,8 +81,9 @@ services:
 volumes:
   pilgrimage-postgres:
     name: anime-pilgrimage-agent-postgres
+  pilgrimage-rag-index:
+    name: anime-pilgrimage-agent-rag-index
 
 networks:
   frontend:
   backend:
-

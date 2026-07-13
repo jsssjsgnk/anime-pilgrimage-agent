@@ -20,6 +20,13 @@
 - Official LangGraph interrupt documentation requires a checkpointer and stable `thread_id`; an interrupted node restarts from its beginning and resumes through `Command(resume=...)`, so every pre-interrupt operation must be idempotent.
 - Official LangGraph persistence documentation provides `AsyncPostgresSaver` through `langgraph-checkpoint-postgres`; its schema setup is explicit and PostgreSQL-backed checkpoints support recovery after an API process restart.
 - The locked project currently resolves LangGraph 0.6.11 and exposes `InMemorySaver`, which is suitable for deterministic graph unit tests while PostgreSQL remains the production checkpoint boundary.
+- The multilingual E5 small model card identifies the 384-dimensional multilingual MiniLM initialization and the required retrieval usage; Phase 5 will prefix queries with `query: `, passages with `passage: `, and normalize vectors.
+- pgvector's official documentation confirms that `<=>` is cosine distance and that exact nearest-neighbor search is the default; no approximate index is justified for the small acceptance corpus.
+- bm25s officially supports application-layer tokenization, deterministic indexing/retrieval, and persisted indices/corpora. The project will keep one namespace-aware index snapshot and rebuild it after writes or deletion.
+- pypdf explicitly cannot extract text from image-only scans, so low-text PDFs must return `needs_ocr` instead of empty chunks or invented content.
+- Kyoto City's official tourism guidance says visitors must respect no-photography notices and designated photography areas; only a short project-authored summary and its URL will be used in the fixed RAG corpus.
+- Tokyo Metro's official accessibility pages distinguish a verified step-free “one-route” and warn that facilities can be temporarily unavailable; retrieved accessibility guidance must carry access date and reconfirmation status.
+- GO TOKYO's official Shimokitazawa guide notes the area's late-morning opening pattern. This is unstructured neighborhood guidance, not a structured opening-hours override, and will be represented only as a sourced contextual fixture.
 - No official public Anitabi API, terms, or robots guidance was discoverable from the official-domain search. The legally safe Phase 2 baseline therefore remains the handoff-authorized imported JSON/GeoJSON provider plus fixtures, with no scraping or access-control bypass.
 - The repository has no existing planning files at task start; `START_HERE.md` and root `AGENTS.md` are present.
 - The Codex task already has an active goal matching the user request.
@@ -75,6 +82,11 @@
 - openrouteservice matrix official documentation: `https://giscience.github.io/openrouteservice/api-reference/endpoints/matrix/`
 
 ## Visual/Browser Findings
+- Phase 5 post-fix screenshots show the complete five-stage flow with all three days preserved after a Day 2-only revision, a visible 5 km trip-wide cap, a separately labelled 3 km Day 2 local constraint, source/date/authority evidence, and export controls on both desktop and mobile.
+- Interactive browser inspection caught a whole-plan recomputation that the initial screenshots did not make obvious; the final E2E now records Day 1/3 text before revision and requires exact stability afterward.
+- The official multilingual E5 snapshot works offline when SentenceTransformers 4.x explicitly composes the Transformer and mean-pooling modules; the smoke proves 384 dimensions, unit norm, and multilingual retrieval ordering.
+- The fixed 24-query corpus scores Recall@6 0.929, MRR@10 0.952, and Citation Precision 0.952. Two failed query IDs remain disclosed in `artifacts/rag-evaluation.json`.
+- Production BM25 persistence requires an app-owned path because the API image runs as a non-root user; a dedicated named volume now preserves immutable corpus indexes across API container recreation.
 - Phase 3 desktop/mobile screenshots keep the long workflow legible: selection cards clearly show chosen transport/base, the walking-limit control remains visible before generation, and the three-column desktop timeline becomes well-spaced stacked day cards on mobile.
 - In-app browser verification confirmed the Access/Base controls expose checked radio state, Route B reports an ORS road estimate, each day stays at or under the selected 5 km cap, and every navigation link is an encoded `api=1` Google Maps URL.
 - Phase 3 gate passed 11 checks: property-based Route B membership, must/exclude/buffer/timezone/walking constraints, ORS/Haversine paths, Google Maps splitting, relative-date Kyoto→Tokyo scenario, Compose API smoke, and six serialized desktop/mobile E2E cases.

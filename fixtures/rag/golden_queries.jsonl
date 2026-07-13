@@ -1,0 +1,24 @@
+{"query_id":"official-01","question":"What should I do when I see a no-photography sign in Kyoto?","expected_document_ids":["11111111-1111-4111-8111-111111111111"]}
+{"query_id":"official-02","question":"Are photos allowed everywhere in Gion residential lanes?","expected_document_ids":["11111111-1111-4111-8111-111111111111"]}
+{"query_id":"official-03","question":"京都の撮影禁止表示を見たらどうする？","aliases":["Kyoto","photography notice"],"expected_document_ids":["11111111-1111-4111-8111-111111111111"]}
+{"query_id":"official-04","question":"May I enter private Kyoto lanes for a scene photo?","expected_document_ids":["11111111-1111-4111-8111-111111111111"]}
+{"query_id":"official-05","question":"How should pilgrims avoid blocking residents in narrow roads?","expected_document_ids":["11111111-1111-4111-8111-111111111111"]}
+{"query_id":"official-06","question":"Which rule wins when a local Kyoto notice differs from general advice?","expected_document_ids":["11111111-1111-4111-8111-111111111111"]}
+{"query_id":"transfer-01","question":"What does Tokyo Metro one-route mean?","expected_document_ids":["22222222-2222-4222-8222-222222222222"]}
+{"query_id":"transfer-02","question":"Where can I check elevators inside and outside Tokyo Metro gates?","expected_document_ids":["22222222-2222-4222-8222-222222222222"]}
+{"query_id":"transfer-03","question":"How should I plan a low-walking Tokyo Otemachi transfer?","expected_document_ids":["44444444-4444-4444-8444-444444444444"]}
+{"query_id":"transfer-04","question":"Why is the station name alone insufficient for an accessible transfer?","expected_document_ids":["44444444-4444-4444-8444-444444444444"]}
+{"query_id":"transfer-05","question":"Should I recheck temporary elevator outages?","expected_document_ids":["22222222-2222-4222-8222-222222222222","44444444-4444-4444-8444-444444444444"]}
+{"query_id":"transfer-06","question":"東京メトロで段差の少ない経路は何を確認する？","aliases":["one-route","elevator"],"expected_document_ids":["22222222-2222-4222-8222-222222222222"]}
+{"query_id":"scene-01","question":"What is Shimokitazawa known for when planning a visit?","expected_document_ids":["33333333-3333-4333-8333-333333333333"]}
+{"query_id":"scene-02","question":"Why might an early Shimokitazawa visit find fewer shops open?","expected_document_ids":["33333333-3333-4333-8333-333333333333"]}
+{"query_id":"scene-03","question":"ぼっち・ざ・ろっくの下北沢巡礼で第8話を優先するときの注意は？","aliases":["孤独摇滚","Bocchi the Rock"],"expected_document_ids":["55555555-5555-4555-8555-555555555555"]}
+{"query_id":"scene-04","question":"作品描写から実在店舗の撮影許可を推測してよい？","expected_document_ids":["55555555-5555-4555-8555-555555555555"]}
+{"query_id":"scene-05","question":"Does scene context change Route A coordinates or membership?","expected_document_ids":["55555555-5555-4555-8555-555555555555"]}
+{"query_id":"scene-06","question":"Should a venue's exact access rule be confirmed before departure?","expected_document_ids":["33333333-3333-4333-8333-333333333333"]}
+{"query_id":"security-01","question":"What malicious text asks the agent to reveal credentials and book?","expected_document_ids":["99999999-9999-4999-8999-999999999999"]}
+{"query_id":"negative-01","question":"What is the moon's population?","expected_document_ids":[],"expected_empty":true}
+{"query_id":"negative-02","question":"Is the fictional 2025 west entrance restriction current?","travel_date":"2026-09-10","expected_document_ids":[],"expected_empty":true}
+{"query_id":"negative-03","owner_user_id":"another-user","question":"What private walking preference did golden-user save?","expected_document_ids":[],"expected_empty":true}
+{"query_id":"private-01","owner_user_id":"golden-user","question":"What private low-walking preference did I explicitly save?","expected_document_ids":["66666666-6666-4666-8666-666666666666"]}
+{"query_id":"trip-01","owner_user_id":"golden-user","trip_id":"77777777-aaaa-4aaa-8aaa-777777777777","question":"Where should I leave my large suitcase for this trip?","expected_document_ids":["77777777-7777-4777-8777-777777777777"]}

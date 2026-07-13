@@ -211,6 +211,91 @@ PHASE_4 = (
     Check("Desktop/mobile browser regression", ("pnpm", "test:e2e"), "e2e"),
 )
 
+PHASE_5 = (
+    Check("Python lint", ("uv", "run", "ruff", "check", "."), "static"),
+    Check("Python strict types", ("uv", "run", "mypy"), "static"),
+    Check("Web lint", ("pnpm", "lint"), "static"),
+    Check("Web strict types", ("pnpm", "typecheck"), "static"),
+    Check(
+        "RAG ingestion, retrieval, conflicts, persistence, and exports",
+        (
+            "uv",
+            "run",
+            "pytest",
+            "tests/unit/test_phase5_rag.py",
+            "tests/unit/test_phase5_ingestion_exports.py",
+        ),
+        "fixture",
+    ),
+    Check(
+        "Golden metrics and versioned export schemas",
+        ("uv", "run", "python", "scripts/phase5_artifacts.py"),
+        "fixture",
+    ),
+    Check(
+        "All Python regressions with coverage",
+        (
+            "uv",
+            "run",
+            "pytest",
+            "tests/unit",
+            "tests/contract",
+            "--cov=pilgrimage_agent",
+            "--cov-report=term-missing",
+        ),
+        "fixture",
+    ),
+    Check("Web unit regression", ("pnpm", "test"), "fixture"),
+    Check("Repository secret scan", (sys.executable, "scripts/check_secrets.py"), "security"),
+    Check(
+        "Real multilingual E5 dimension and normalization",
+        ("uv", "run", "--extra", "rag", "python", "scripts/e5_smoke.py"),
+        "model",
+    ),
+    Check("Build and start full stack", ("docker", "compose", "up", "-d", "--build"), "compose"),
+    Check("Four-service health", (sys.executable, "scripts/wait_compose.py"), "compose"),
+    Check(
+        "RAG migration is current",
+        ("docker", "compose", "exec", "-T", "api", "alembic", "upgrade", "head"),
+        "integration",
+    ),
+    Check(
+        "Exact pgvector and persistent BM25/RRF",
+        (
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "api",
+            "python",
+            "-m",
+            "pilgrimage_agent.smoke.phase5_rag",
+        ),
+        "integration",
+    ),
+    Check(
+        "Knowledge API isolation, dedupe, metrics, and deletion",
+        (sys.executable, "scripts/phase5_api_smoke.py"),
+        "integration",
+    ),
+    Check("Complete revision and export browser flow", ("pnpm", "test:e2e"), "e2e"),
+    Check(
+        "Remove fixed RAG corpus from PostgreSQL",
+        (
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "api",
+            "python",
+            "-m",
+            "pilgrimage_agent.smoke.phase5_rag",
+            "--cleanup",
+        ),
+        "integration",
+    ),
+)
+
 
 def redact(text: str) -> str:
     """Remove likely credential-bearing lines before report/log output."""
@@ -238,7 +323,9 @@ def resolve_command(command: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def run_phase(phase: int) -> bool:
-    phase_checks = {1: PHASE_1, 2: PHASE_2, 3: PHASE_3, 4: PHASE_4}.get(phase)
+    phase_checks = {1: PHASE_1, 2: PHASE_2, 3: PHASE_3, 4: PHASE_4, 5: PHASE_5}.get(
+        phase
+    )
     if phase_checks is None:
         ARTIFACTS.mkdir(parents=True, exist_ok=True)
         path = ARTIFACTS / f"phase-{phase}-report.md"
@@ -253,6 +340,8 @@ def run_phase(phase: int) -> bool:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     command_env = os.environ.copy()
     command_env["COMPOSE_BAKE"] = "false"
+    if phase >= 5:
+        command_env["HF_HUB_OFFLINE"] = "1"
     for check in phase_checks:
         print(f"\n=== {check.name} ===", flush=True)
         try:

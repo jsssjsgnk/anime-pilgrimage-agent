@@ -1,0 +1,96 @@
+schema_version: "1"
+accessed_at: 2026-07-14
+summary_policy: Project-authored short summaries only; no source page is redistributed.
+documents:
+  - id: 11111111-1111-4111-8111-111111111111
+    file: documents/kyoto-etiquette.md
+    content_sha256: 384cd98992480fd6963f0f5c08b14f940e2db49fce0a0dfcb90c4cd9a00e3950
+    namespace: curated
+    title: Kyoto photography and resident etiquette
+    source_url: https://kyoto.travel/en/responsible-travel
+    source_type: official_guide
+    authority_level: 4
+    language: en
+    location_tags: [Kyoto, Gion]
+    usage: Short paraphrase of official visitor guidance.
+  - id: 22222222-2222-4222-8222-222222222222
+    file: documents/tokyo-metro-accessibility.md
+    content_sha256: c7ff9982f78f5a92ef7e4e33f19ae55fd5ebbfa7af523e735fc8014a3bf50493
+    namespace: curated
+    title: Tokyo Metro barrier-free route guidance
+    source_url: https://www.tokyometro.jp/lang_en/station/search_accessibility/index.html
+    source_type: transport_operator
+    authority_level: 4
+    language: en
+    location_tags: [Tokyo, Tokyo Metro]
+    usage: Short paraphrase of operator facility definitions.
+  - id: 33333333-3333-4333-8333-333333333333
+    file: documents/shimokitazawa-guide.md
+    content_sha256: 7ffa7b74e8e6e30f57fb5870955beeacf917db5e8df0c3c44f9a8752f16a193b
+    namespace: curated
+    title: Shimokitazawa neighborhood planning note
+    source_url: https://www.gotokyo.org/en/story/walks-and-tours/shimo-kitazawa/
+    source_type: official_guide
+    authority_level: 4
+    language: en
+    location_tags: [Tokyo, Shimokitazawa]
+    subject_ids: ["328609"]
+    usage: Short paraphrase; opening patterns remain contextual and require reconfirmation.
+  - id: 44444444-4444-4444-8444-444444444444
+    file: documents/tokyo-transfer.md
+    content_sha256: 4a04f57584854a7cd08e7ab23e34d0e29757650967f4166f5ab12f24cb2c1ea0
+    namespace: curated
+    title: Tokyo and Otemachi low-walking transfer checklist
+    source_type: synthetic_test
+    authority_level: 0
+    language: en
+    location_tags: [Tokyo, Otemachi]
+    usage: Synthetic test text; not presented as a real rule.
+  - id: 55555555-5555-4555-8555-555555555555
+    file: documents/bocchi-scene-context.md
+    content_sha256: 67d696827016384aecb89635539c98f556808e3ae091a26a283266a1f66e86ed
+    namespace: curated
+    title: Bocchi the Rock Shimokitazawa scene context
+    source_type: synthetic_test
+    authority_level: 0
+    language: ja
+    location_tags: [Tokyo, Shimokitazawa]
+    subject_ids: ["328609"]
+    usage: Synthetic scene-context fixture with no claim of official status.
+  - id: 66666666-6666-4666-8666-666666666666
+    file: documents/private-user-note.md
+    content_sha256: 33a17372e1f740559e69ae82b766b87d9e5ea44bbfbbffc28991545e3e07a083
+    namespace: user:golden-user
+    title: Private low-walking preference note
+    source_type: user_note
+    authority_level: 1
+    language: en
+    usage: Synthetic private namespace fixture.
+  - id: 77777777-7777-4777-8777-777777777777
+    file: documents/trip-note.md
+    content_sha256: e1a8ed21a5e4a9283d292fbd4e7602789ba6d0da1a95236af1c71c67d5a2c615
+    namespace: trip:77777777-aaaa-4aaa-8aaa-777777777777
+    title: Trip-only luggage note
+    source_type: user_note
+    authority_level: 1
+    language: en
+    usage: Synthetic trip namespace fixture.
+  - id: 88888888-8888-4888-8888-888888888888
+    file: documents/expired-rule.md
+    content_sha256: c2831b2523d8799ab4a67ee6891df35ddd635204cd1d16f395cc2d7f7642a7d5
+    namespace: curated
+    title: Expired temporary entrance rule
+    source_type: synthetic_test
+    authority_level: 0
+    language: en
+    valid_until: 2025-12-31
+    usage: Explicitly expired synthetic fixture.
+  - id: 99999999-9999-4999-8999-999999999999
+    file: documents/malicious-note.md
+    content_sha256: a2db55cc5eb927087290099a318c412da0fab7779151f5ecf5ce3d296e6277e2
+    namespace: curated
+    title: Prompt-injection resistance fixture
+    source_type: synthetic_test
+    authority_level: 0
+    language: en
+    usage: Synthetic malicious text used only to prove it remains untrusted data.

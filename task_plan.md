@@ -4,7 +4,7 @@
 Read the complete required handoff chain, implement and verify all six project phases, and finish only when `make verify-all` passes or a genuine user-only blocker is documented.
 
 ## Current Phase
-Phase 5 — RAG, complete Web flow, and exports
+Phase 6 — evaluation, hardening, documentation, and final acceptance
 
 ## Phases
 
@@ -39,17 +39,17 @@ Phase 5 — RAG, complete Web flow, and exports
 - **Status:** complete
 
 ### Phase 5: RAG, complete Web flow, and exports
-- [ ] Implement the Phase 5 handoff requirements
-- [ ] Run and fix `make verify-phase-5`
-- [ ] Commit the completed phase if Git identity is configured
-- **Status:** in_progress
+- [x] Implement the Phase 5 handoff requirements
+- [x] Run and fix `make verify-phase-5`
+- [x] Commit the completed phase if Git identity is configured
+- **Status:** complete
 
 ### Phase 6: Evaluation, hardening, documentation, and final acceptance
 - [ ] Implement the Phase 6 handoff requirements
 - [ ] Run and fix `make verify-phase-6`
 - [ ] Run and fix `make verify-all`
 - [ ] Commit the completed phase if Git identity is configured
-- **Status:** pending
+- **Status:** in_progress
 
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
@@ -110,6 +110,18 @@ Phase 5 — RAG, complete Web flow, and exports
 | Parallel mobile E2E intermittently failed opening distinct screenshot files in the Windows Documents workspace | 1 | Serialize Playwright workers for deterministic artifact writes across desktop/mobile projects |
 | First Phase 4 static/test pass exposed LangGraph's reserved `__interrupt__` channel, generic inference gaps, and style-only findings | 1 | Keep interrupt metadata outside the declared graph state, add narrow typed result casts, and apply scoped formatting fixes |
 | First Phase 4 gate wrapper was given a one-second process timeout and ended before a check ran | 1 | Relaunch with the gate's normal build, restart, live-smoke, and browser time budget |
+| First Phase 5 fixture pass found YAML numeric coercion for subject IDs plus narrow style findings | 1 | Quote identifier scalars in the manifest and use explicit Unicode escapes/line wrapping in tests and migration |
+| First real E5 smoke exceeded five minutes during the model's initial local download without returning an error | 1 | Re-run the resumable download with a larger one-time budget; do not substitute or claim the model passed |
+| Resumed official E5 download also exceeded a ten-minute bounded window without loading the model | 2 | Keep the real-model smoke explicitly unpassed, continue independent Phase 5 work, and retry only after the remaining gate is stable |
+| First Phase 5 Compose build reached the Web compile but the clean container lacked Node built-in type declarations used by the export E2E | 1 | Add the explicit `@types/node` development dependency and regenerate the frozen pnpm lock |
+| pnpm lock update output triggered Conda's legacy GBK relay error because the known UTF-8 overrides were omitted | 1 | Re-run the scoped install with `PYTHONUTF8` and `PYTHONIOENCODING` set; do not infer success from the wrapper's exit |
+| First container RAG smoke resolved fixtures relative to the installed wheel under `/opt/venv` | 1 | Resolve the intentionally copied fixture corpus from the application working directory in both API and smoke paths |
+| First pgvector fixture insert flushed chunk rows before the new parent document without an ORM relationship | 1 | Explicitly flush the document record before adding its foreign-keyed chunks in the same transaction |
+| Interactive Phase 5 inspection found a local revision changed Day 3 despite promising stability | 1 | Merge only recalculated Day 2 into the prior plan and assert Day 1/3 text remains identical |
+| Offline E5 load exposed missing tokenizer dependencies and a SentenceTransformers 5 pooling incompatibility | 1 | Lock SentencePiece/protobuf, pin compatible 4.x, and construct documented mean pooling over the official weights |
+| A bounded retry could not fetch one missing E5 packaging metadata file | 3 | Avoid that fragile metadata by explicitly composing Transformer plus mean pooling; real offline smoke passed |
+| First Phase 5 production smoke could not create `.cache` as the non-root API user | 1 | Add an app-owned BM25 directory backed by the dedicated RAG index Docker volume |
+| Two accidental one-second Phase 5 gate wrappers timed out before useful work | 2 | Relaunch once with the normal full acceptance budget |
 
 ## Guardrails
 - Never expose `.env`, secrets, tokens, headers, cookies, or signed MCP URLs.

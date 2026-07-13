@@ -1,0 +1,531 @@
+{
+  "$defs": {
+    "AccessMode": {
+      "enum": [
+        "flight",
+        "train",
+        "bus",
+        "manual"
+      ],
+      "title": "AccessMode",
+      "type": "string"
+    },
+    "AccessOption": {
+      "additionalProperties": false,
+      "properties": {
+        "option_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Option Id",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/AccessMode"
+        },
+        "origin": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Origin",
+          "type": "string"
+        },
+        "destination": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Destination",
+          "type": "string"
+        },
+        "departure_at": {
+          "format": "date-time",
+          "title": "Departure At",
+          "type": "string"
+        },
+        "arrival_at": {
+          "format": "date-time",
+          "title": "Arrival At",
+          "type": "string"
+        },
+        "price": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currency"
+        },
+        "confirmation_url": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confirmation Url"
+        },
+        "provenance": {
+          "$ref": "#/$defs/DataProvenance"
+        }
+      },
+      "required": [
+        "option_id",
+        "mode",
+        "origin",
+        "destination",
+        "departure_at",
+        "arrival_at",
+        "provenance"
+      ],
+      "title": "AccessOption",
+      "type": "object"
+    },
+    "AccessSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "inbound": {
+          "$ref": "#/$defs/AccessOption"
+        },
+        "outbound": {
+          "$ref": "#/$defs/AccessOption"
+        },
+        "alternatives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AccessOption"
+          },
+          "title": "Alternatives",
+          "type": "array"
+        }
+      },
+      "required": [
+        "inbound",
+        "outbound"
+      ],
+      "title": "AccessSelection",
+      "type": "object"
+    },
+    "BaseCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "base_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Base Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "coordinate": {
+          "$ref": "#/$defs/GeoCoordinate"
+        },
+        "provenance": {
+          "$ref": "#/$defs/DataProvenance"
+        }
+      },
+      "required": [
+        "base_id",
+        "name",
+        "coordinate",
+        "provenance"
+      ],
+      "title": "BaseCandidate",
+      "type": "object"
+    },
+    "DataProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
+        },
+        "fetched_at": {
+          "format": "date-time",
+          "title": "Fetched At",
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "status": {
+          "$ref": "#/$defs/DataStatus"
+        },
+        "schema_version": {
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "fetched_at",
+        "status"
+      ],
+      "title": "DataProvenance",
+      "type": "object"
+    },
+    "DataStatus": {
+      "enum": [
+        "live",
+        "cached",
+        "estimated",
+        "community",
+        "needs_confirmation",
+        "unknown"
+      ],
+      "title": "DataStatus",
+      "type": "string"
+    },
+    "DayPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "window_start": {
+          "format": "date-time",
+          "title": "Window Start",
+          "type": "string"
+        },
+        "window_end": {
+          "format": "date-time",
+          "title": "Window End",
+          "type": "string"
+        },
+        "visits": {
+          "items": {
+            "$ref": "#/$defs/ScheduledVisit"
+          },
+          "title": "Visits",
+          "type": "array"
+        },
+        "walking_distance_meters": {
+          "minimum": 0,
+          "title": "Walking Distance Meters",
+          "type": "number"
+        },
+        "maps_urls": {
+          "default": [],
+          "items": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Maps Urls",
+          "type": "array"
+        }
+      },
+      "required": [
+        "date",
+        "window_start",
+        "window_end",
+        "visits",
+        "walking_distance_meters"
+      ],
+      "title": "DayPlan",
+      "type": "object"
+    },
+    "GeoCoordinate": {
+      "additionalProperties": false,
+      "properties": {
+        "latitude": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Latitude",
+          "type": "number"
+        },
+        "longitude": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Longitude",
+          "type": "number"
+        }
+      },
+      "required": [
+        "latitude",
+        "longitude"
+      ],
+      "title": "GeoCoordinate",
+      "type": "object"
+    },
+    "LocalWalkingConstraint": {
+      "additionalProperties": false,
+      "properties": {
+        "day": {
+          "maximum": 31,
+          "minimum": 1,
+          "title": "Day",
+          "type": "integer"
+        },
+        "max_walking_meters": {
+          "exclusiveMinimum": 0,
+          "maximum": 50000,
+          "title": "Max Walking Meters",
+          "type": "number"
+        }
+      },
+      "required": [
+        "day",
+        "max_walking_meters"
+      ],
+      "title": "LocalWalkingConstraint",
+      "type": "object"
+    },
+    "OmissionCode": {
+      "enum": [
+        "excluded",
+        "walking_limit",
+        "time_window",
+        "no_available_day",
+        "invalid_matrix"
+      ],
+      "title": "OmissionCode",
+      "type": "string"
+    },
+    "OmissionReason": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/OmissionCode"
+        },
+        "detail": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail"
+      ],
+      "title": "OmissionReason",
+      "type": "object"
+    },
+    "RouteBPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "route_a_point_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Route A Point Ids",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "base": {
+          "$ref": "#/$defs/BaseCandidate"
+        },
+        "days": {
+          "items": {
+            "$ref": "#/$defs/DayPlan"
+          },
+          "title": "Days",
+          "type": "array"
+        },
+        "omitted_reasons": {
+          "additionalProperties": {
+            "$ref": "#/$defs/OmissionReason"
+          },
+          "propertyNames": {
+            "format": "uuid"
+          },
+          "title": "Omitted Reasons",
+          "type": "object"
+        },
+        "matrix_status": {
+          "enum": [
+            "road",
+            "straight_line_estimate"
+          ],
+          "title": "Matrix Status",
+          "type": "string"
+        },
+        "access": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AccessSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "route_a_point_ids",
+        "base",
+        "days",
+        "omitted_reasons",
+        "matrix_status"
+      ],
+      "title": "RouteBPlan",
+      "type": "object"
+    },
+    "ScheduledVisit": {
+      "additionalProperties": false,
+      "properties": {
+        "point_id": {
+          "format": "uuid",
+          "title": "Point Id",
+          "type": "string"
+        },
+        "start_at": {
+          "format": "date-time",
+          "title": "Start At",
+          "type": "string"
+        },
+        "end_at": {
+          "format": "date-time",
+          "title": "End At",
+          "type": "string"
+        },
+        "incoming_distance_meters": {
+          "minimum": 0,
+          "title": "Incoming Distance Meters",
+          "type": "number"
+        },
+        "incoming_duration_seconds": {
+          "minimum": 0,
+          "title": "Incoming Duration Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "point_id",
+        "start_at",
+        "end_at",
+        "incoming_distance_meters",
+        "incoming_duration_seconds"
+      ],
+      "title": "ScheduledVisit",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "plan_version": {
+      "minimum": 1,
+      "title": "Plan Version",
+      "type": "integer"
+    },
+    "subject_id": {
+      "minLength": 1,
+      "title": "Subject Id",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "route_a_point_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Route A Point Ids",
+      "type": "array"
+    },
+    "route_b": {
+      "$ref": "#/$defs/RouteBPlan"
+    },
+    "evidence_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "local_constraints": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/LocalWalkingConstraint"
+      },
+      "title": "Local Constraints",
+      "type": "array"
+    },
+    "reconfirm_before_departure": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Reconfirm Before Departure",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "plan_version",
+    "subject_id",
+    "generated_at",
+    "route_a_point_ids",
+    "route_b",
+    "evidence_ids",
+    "reconfirm_before_departure"
+  ],
+  "title": "PlanExport",
+  "type": "object"
+}

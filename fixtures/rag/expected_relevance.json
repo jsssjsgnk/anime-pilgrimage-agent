@@ -1,0 +1,10 @@
+{
+  "schema_version": "1",
+  "notes": "The JSONL file is authoritative; this file documents the four six-query categories.",
+  "categories": {
+    "official_rules": 6,
+    "transfers_and_access": 6,
+    "multilingual_scene_context": 6,
+    "negative_expired_namespace_injection": 6
+  }
+}

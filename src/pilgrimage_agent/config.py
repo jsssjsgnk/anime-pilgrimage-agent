@@ -1,6 +1,7 @@
 """Server-side configuration with value-safe validation messages."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr
@@ -37,6 +38,9 @@ class Settings(BaseSettings):
     provider_timeout_seconds: float = 10.0
     provider_max_attempts: int = 3
     provider_mode: Literal["fixture", "live"] = "fixture"
+    rag_bm25_index_dir: Path = Field(
+        default=Path(".cache/rag-bm25"), alias="RAG_BM25_INDEX_DIR"
+    )
 
     def capability_status(self) -> dict[str, bool]:
         """Return presence flags only; values never leave the server."""

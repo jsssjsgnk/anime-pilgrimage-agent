@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "GeoJsonFeature": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "Feature",
+          "title": "Type",
+          "type": "string"
+        },
+        "geometry": {
+          "$ref": "#/$defs/GeoJsonPoint"
+        },
+        "properties": {
+          "$ref": "#/$defs/GeoJsonProperties"
+        }
+      },
+      "required": [
+        "type",
+        "geometry",
+        "properties"
+      ],
+      "title": "GeoJsonFeature",
+      "type": "object"
+    },
+    "GeoJsonPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "Point",
+          "title": "Type",
+          "type": "string"
+        },
+        "coordinates": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Coordinates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "title": "GeoJsonPoint",
+      "type": "object"
+    },
+    "GeoJsonProperties": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source_url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Source Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "source_url"
+      ],
+      "title": "GeoJsonProperties",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "FeatureCollection",
+      "title": "Type",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "features": {
+      "items": {
+        "$ref": "#/$defs/GeoJsonFeature"
+      },
+      "title": "Features",
+      "type": "array"
+    }
+  },
+  "required": [
+    "type",
+    "schema_version",
+    "features"
+  ],
+  "title": "GeoJsonExport",
+  "type": "object"
+}

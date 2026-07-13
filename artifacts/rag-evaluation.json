@@ -1,0 +1,16 @@
+{
+  "model_revision": "fixture-e5-hash-v1",
+  "corpus_sha256": "7cd19904f08858a525bb2bea1f4b5e4986beb93aa147df32ec944f389e43aab8",
+  "query_count": 24,
+  "recall_at_6": 0.9285714285714286,
+  "mrr_at_10": 0.9523809523809523,
+  "citation_precision": 0.9523809523809523,
+  "namespace_leaks": 0,
+  "malicious_tool_calls": 0,
+  "deleted_result_residues": 0,
+  "unsupported_answer_rate": 0.0,
+  "failed_query_ids": [
+    "transfer-05",
+    "scene-05"
+  ]
+}

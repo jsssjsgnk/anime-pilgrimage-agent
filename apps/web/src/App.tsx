@@ -4,12 +4,15 @@ import {
   Check,
   CircleHelp,
   Compass,
+  BookOpenCheck,
+  Download,
   Footprints,
   ExternalLink,
   Map,
   MapPin,
   MessageSquareText,
   Route,
+  RefreshCcw,
   ShieldCheck,
   TrainFront,
 } from "lucide-react";
@@ -102,6 +105,22 @@ interface RouteBPlan {
   access: { inbound: AccessOption; outbound: AccessOption } | null;
 }
 
+interface RetrievedEvidence {
+  evidence_id: string;
+  excerpt: string;
+  title: string;
+  source_url: string | null;
+  authority_level: number;
+  accessed_at: string;
+  freshness: "current" | "unknown";
+}
+
+interface KnowledgeSearchResult {
+  status: "sufficient_evidence" | "insufficient_evidence";
+  evidence: RetrievedEvidence[];
+  tool_calls_triggered: 0;
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) throw new Error("无法读取已验证的数据，请稍后重试。");
@@ -123,6 +142,25 @@ function timeText(value: string): string {
 
 function modeText(mode: AccessOption["mode"]): string {
   return { flight: "航班", train: "新干线", bus: "夜行巴士", manual: "人工候选" }[mode];
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/gu, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character] ?? character);
+}
+
+function saveFile(filename: string, type: string, content: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function RouteMap({ points }: { points: Point[] }) {
@@ -189,6 +227,10 @@ export function App() {
   const [outboundId, setOutboundId] = useState<string | null>(null);
   const [baseId, setBaseId] = useState<string | null>(null);
   const [walkingLimit, setWalkingLimit] = useState(5_000);
+  const [modification, setModification] = useState("第二天少走路，并保留其他天安排");
+  const [planVersion, setPlanVersion] = useState(1);
+  const [displayedPlan, setDisplayedPlan] = useState<RouteBPlan | null>(null);
+  const [dayTwoWalkingLimit, setDayTwoWalkingLimit] = useState<number | null>(null);
 
   const subjectQuery = useQuery({
     queryKey: ["subjects", animeFromRequest(request)],
@@ -209,7 +251,7 @@ export function App() {
     enabled: confirmedId !== null,
   });
   const routeBMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: ({ limit }: { limit: number; localDay?: number }) =>
       fetchJson<RouteBPlan>(`/api/subjects/${confirmedId ?? ""}/route-b`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -217,29 +259,118 @@ export function App() {
           inbound_option_id: inboundId,
           outbound_option_id: outboundId,
           base_id: baseId,
-          max_walking_meters_per_day: walkingLimit,
+          max_walking_meters_per_day: limit,
           must_visit_point_ids: [],
           excluded_point_ids: [],
         }),
       }),
+    onSuccess: (nextPlan, variables) => {
+      if (variables.localDay === 2) {
+        setDisplayedPlan((currentPlan) => {
+          if (!currentPlan) return nextPlan;
+          return {
+            ...currentPlan,
+            days: currentPlan.days.map((day, index) =>
+              index === 1 ? (nextPlan.days[index] ?? day) : day,
+            ),
+          };
+        });
+        setDayTwoWalkingLimit(variables.limit);
+        setPlanVersion((version) => version + 1);
+        return;
+      }
+      setDisplayedPlan(nextPlan);
+      setDayTwoWalkingLimit(null);
+      setPlanVersion(1);
+    },
   });
+  const evidenceQuery = useQuery({
+    queryKey: ["knowledge", confirmedId, displayedPlan?.base.base_id],
+    queryFn: () =>
+      fetchJson<KnowledgeSearchResult>("/api/knowledge/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          owner_user_id: "demo-user",
+          question: "Shimokitazawa venue photography rules and neighborhood visit guidance",
+          subject_ids: [confirmedId],
+          aliases: ["孤独摇滚", "Bocchi the Rock"],
+          location_tags: ["Shimokitazawa", "Tokyo"],
+          top_k: 3,
+        }),
+      }),
+    enabled: Boolean(displayedPlan),
+  });
+
+  const resetRouteB = () => {
+    routeBMutation.reset();
+    setDisplayedPlan(null);
+    setDayTwoWalkingLimit(null);
+    setPlanVersion(1);
+  };
 
   const confirmCandidate = async (subjectId: string) => {
     await fetchJson(`/api/subjects/${subjectId}/confirm`, { method: "POST" });
-    routeBMutation.reset();
+    resetRouteB();
     setInboundId(null);
     setOutboundId(null);
     setBaseId(null);
     setConfirmedId(subjectId);
   };
 
-  const activeStage = routeBMutation.data ? 3 : confirmedId ? 2 : submitted ? 1 : 0;
+  const activeStage = displayedPlan ? 4 : confirmedId ? 2 : submitted ? 1 : 0;
   const stages = [
     { label: "说出想法", icon: MessageSquareText },
     { label: "确认作品", icon: Check },
     { label: "选择交通", icon: Compass },
     { label: "生成路线", icon: Route },
+    { label: "修改与导出", icon: Download },
   ];
+
+  const applyModification = () => {
+    const nextLimit = modification.includes("少走路") ? 3_000 : walkingLimit;
+    routeBMutation.mutate({ limit: nextLimit, localDay: 2 });
+  };
+
+  const exportPlan = (format: "json" | "geojson" | "html") => {
+    if (!displayedPlan || !routeQuery.data) return;
+    const selectedIds = new Set(
+      displayedPlan.days.flatMap((day) => day.visits.map((visit) => visit.point_id)),
+    );
+    const exportData = {
+      schema_version: "1",
+      plan_version: planVersion,
+      subject_id: confirmedId,
+      generated_at: new Date().toISOString(),
+      route_a_point_ids: routeQuery.data.points.map((point) => point.id),
+      route_b: displayedPlan,
+      local_constraints: dayTwoWalkingLimit === null
+        ? []
+        : [{ day: 2, max_walking_meters: dayTwoWalkingLimit }],
+      evidence_ids: evidenceQuery.data?.evidence.map((item) => item.evidence_id) ?? [],
+      reconfirm_before_departure: ["transport", "weather", "opening and photography rules"],
+    };
+    if (format === "json") {
+      saveFile("pilgrimage-plan.json", "application/json", JSON.stringify(exportData, null, 2));
+      return;
+    }
+    if (format === "geojson") {
+      const geojson = {
+        type: "FeatureCollection",
+        schema_version: "1",
+        features: routeQuery.data.points.filter((point) => selectedIds.has(point.id)).map((point) => ({
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [point.longitude, point.latitude] },
+          properties: { id: point.id, name: point.name, source_url: point.provenance.source_url },
+        })),
+      };
+      saveFile("pilgrimage-route.geojson", "application/geo+json", JSON.stringify(geojson, null, 2));
+      return;
+    }
+    const dayHtml = displayedPlan.days.map((day) => `<section><h2>${escapeHtml(day.date)}</h2><p>${(day.walking_distance_meters / 1000).toFixed(1)} km estimated walking</p><ol>${day.visits.map((visit) => `<li>${escapeHtml(timeText(visit.start_at))} — ${escapeHtml(routeQuery.data.points.find((point) => point.id === visit.point_id)?.name ?? "Unknown")}</li>`).join("")}</ol></section>`).join("");
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Pilgrimage Plan v${planVersion}</title><style>body{font:16px/1.6 system-ui;max-width:800px;margin:40px auto;padding:0 24px;color:#17231f}h1,h2{color:#164d44}.notice{border-left:4px solid #b93625;padding:12px;background:#fff3ed}</style></head><body><h1>Pilgrimage Plan · Version ${planVersion}</h1><p class="notice">Read-only plan. Reconfirm transport, weather, opening, access and photography rules before departure.</p>${dayHtml}</body></html>`;
+    saveFile("pilgrimage-plan.html", "text/html", html);
+  };
 
   return (
     <div className="app-shell">
@@ -276,9 +407,9 @@ export function App() {
               <div><p className="eyebrow">开放式输入</p><h2 id="request-title">你想怎样巡礼？</h2></div>
               <CircleHelp size={20} aria-label="提示：请包含出发地、日期、作品和偏好" />
             </div>
-            <form onSubmit={(event) => { event.preventDefault(); routeBMutation.reset(); setConfirmedId(null); setSubmitted(true); }}>
+            <form onSubmit={(event) => { event.preventDefault(); resetRouteB(); setConfirmedId(null); setSubmitted(true); }}>
               <label htmlFor="trip-request">旅行想法</label>
-              <textarea id="trip-request" value={request} onChange={(event) => { setRequest(event.target.value); setSubmitted(false); setConfirmedId(null); routeBMutation.reset(); }} aria-describedby="trip-request-help" rows={6} />
+              <textarea id="trip-request" value={request} onChange={(event) => { setRequest(event.target.value); setSubmitted(false); setConfirmedId(null); resetRouteB(); }} aria-describedby="trip-request-help" rows={6} />
               <p id="trip-request-help" className="helper-text">建议写明出发地、目的地、日期、作品、预算与步行偏好。任何关键默认值都会显示出来。</p>
               <button className="primary-button" type="submit" disabled={!request.trim()}>整理旅行条件<ArrowRight size={19} aria-hidden="true" /></button>
               <p className="submit-status" aria-live="polite">{submitted ? "已收到。请在候选中明确确认作品；不会静默确认关键选择。" : ""}</p>
@@ -351,7 +482,7 @@ export function App() {
               <fieldset className="selection-group">
                 <legend>去程 · 京都 → 东京</legend>
                 {planningQuery.data.access_options.filter((option) => option.destination === "东京").map((option) => (
-                  <button key={option.option_id} className={inboundId === option.option_id ? "option-card selected" : "option-card"} type="button" role="radio" aria-label={`选择去程 ${modeText(option.mode)}`} aria-checked={inboundId === option.option_id} onClick={() => { setInboundId(option.option_id); routeBMutation.reset(); }}>
+                  <button key={option.option_id} className={inboundId === option.option_id ? "option-card selected" : "option-card"} type="button" role="radio" aria-label={`选择去程 ${modeText(option.mode)}`} aria-checked={inboundId === option.option_id} onClick={() => { setInboundId(option.option_id); resetRouteB(); }}>
                     <span className="option-icon"><TrainFront size={19} /></span>
                     <span><strong>{modeText(option.mode)}</strong><small>{timeText(option.departure_at)} → {timeText(option.arrival_at)} · {option.price?.toLocaleString("zh-CN")} {option.currency}</small></span>
                     <Check size={18} className="option-check" />
@@ -361,7 +492,7 @@ export function App() {
               <fieldset className="selection-group">
                 <legend>返程 · 东京 → 京都</legend>
                 {planningQuery.data.access_options.filter((option) => option.origin === "东京").map((option) => (
-                  <button key={option.option_id} className={outboundId === option.option_id ? "option-card selected" : "option-card"} type="button" role="radio" aria-label={`选择返程 ${modeText(option.mode)}`} aria-checked={outboundId === option.option_id} onClick={() => { setOutboundId(option.option_id); routeBMutation.reset(); }}>
+                  <button key={option.option_id} className={outboundId === option.option_id ? "option-card selected" : "option-card"} type="button" role="radio" aria-label={`选择返程 ${modeText(option.mode)}`} aria-checked={outboundId === option.option_id} onClick={() => { setOutboundId(option.option_id); resetRouteB(); }}>
                     <span className="option-icon"><TrainFront size={19} /></span>
                     <span><strong>{modeText(option.mode)}</strong><small>{timeText(option.departure_at)} → {timeText(option.arrival_at)} · {option.price?.toLocaleString("zh-CN")} {option.currency}</small></span>
                     <Check size={18} className="option-check" />
@@ -371,7 +502,7 @@ export function App() {
               <fieldset className="selection-group">
                 <legend>住宿基地</legend>
                 {planningQuery.data.base_candidates.map((candidate) => (
-                  <button key={candidate.base_id} className={baseId === candidate.base_id ? "option-card selected" : "option-card"} type="button" role="radio" aria-label={`选择基地 ${candidate.name}`} aria-checked={baseId === candidate.base_id} onClick={() => { setBaseId(candidate.base_id); routeBMutation.reset(); }}>
+                  <button key={candidate.base_id} className={baseId === candidate.base_id ? "option-card selected" : "option-card"} type="button" role="radio" aria-label={`选择基地 ${candidate.name}`} aria-checked={baseId === candidate.base_id} onClick={() => { setBaseId(candidate.base_id); resetRouteB(); }}>
                     <span className="option-icon"><MapPin size={19} /></span>
                     <span><strong>{candidate.name}</strong><small>{candidate.base_id === planningQuery.data.recommended_base_id ? "按 Route A 距离推荐" : "可选中心基地"}</small></span>
                     <Check size={18} className="option-check" />
@@ -381,12 +512,12 @@ export function App() {
             </div>
             <div className="planning-action">
               <label htmlFor="walking-limit"><Footprints size={18} />每日步行上限</label>
-              <select id="walking-limit" value={walkingLimit} onChange={(event) => { setWalkingLimit(Number(event.target.value)); routeBMutation.reset(); }}>
+              <select id="walking-limit" value={walkingLimit} onChange={(event) => { setWalkingLimit(Number(event.target.value)); resetRouteB(); }}>
                 <option value={3000}>3 公里 · 极少步行</option>
                 <option value={5000}>5 公里 · 少步行</option>
                 <option value={8000}>8 公里 · 标准</option>
               </select>
-              <button className="primary-button" type="button" disabled={!inboundId || !outboundId || !baseId || routeBMutation.isPending} onClick={() => { routeBMutation.mutate(); }}>
+              <button className="primary-button" type="button" disabled={!inboundId || !outboundId || !baseId || routeBMutation.isPending} onClick={() => { routeBMutation.mutate({ limit: walkingLimit }); }}>
                 {routeBMutation.isPending ? "正在验证约束…" : "生成可执行 Route B"}<ArrowRight size={19} />
               </button>
             </div>
@@ -394,19 +525,19 @@ export function App() {
           </section>
         )}
 
-        {routeBMutation.data && routeQuery.data && (
+        {displayedPlan && routeQuery.data && (
           <section className="timeline-section" aria-labelledby="timeline-title">
             <div className="results-heading">
-              <div><p className="eyebrow">确定性验证通过</p><h2 id="timeline-title">Route B · 三日可执行时间轴</h2></div>
-              <span className="source-chip verified">{routeBMutation.data.matrix_status === "road" ? "ORS 道路估算" : "直线估算 · 已降级"}</span>
+              <div><p className="eyebrow">确定性验证通过 · 计划版本 {planVersion}</p><h2 id="timeline-title">Route B · 三日可执行时间轴</h2></div>
+              <span className="source-chip verified">{displayedPlan.matrix_status === "road" ? "ORS 道路估算" : "直线估算 · 已降级"}</span>
             </div>
             <div className="trip-summary">
-              <div><TrainFront size={20} /><span><small>抵达</small><strong>{timeText(routeBMutation.data.access?.inbound.arrival_at ?? "")}</strong></span></div>
-              <div><MapPin size={20} /><span><small>基地</small><strong>{routeBMutation.data.base.name}</strong></span></div>
+              <div><TrainFront size={20} /><span><small>抵达</small><strong>{timeText(displayedPlan.access?.inbound.arrival_at ?? "")}</strong></span></div>
+              <div><MapPin size={20} /><span><small>基地</small><strong>{displayedPlan.base.name}</strong></span></div>
               <div><Footprints size={20} /><span><small>日上限</small><strong>{walkingLimit / 1000} km</strong></span></div>
             </div>
             <div className="timeline-grid">
-              {routeBMutation.data.days.map((day, dayIndex) => (
+              {displayedPlan.days.map((day, dayIndex) => (
                 <article key={day.date} className="day-card">
                   <header><span>DAY {String(dayIndex + 1).padStart(2, "0")}</span><div><strong>{day.date}</strong><small>{(day.walking_distance_meters / 1000).toFixed(1)} km 步行估算</small></div></header>
                   {day.visits.length ? (
@@ -424,6 +555,35 @@ export function App() {
               ))}
             </div>
             <p className="route-note">Route B 仅从 Route A 取点；地图链接用于现场导航，时间和距离仍以 ORS 计划估算为准。出发前请复核交通、天气、营业与拍摄规则。</p>
+            <div className="revision-export-grid">
+              <form className="revision-card" onSubmit={(event) => { event.preventDefault(); applyModification(); }}>
+                <div><p className="eyebrow">局部修改</p><h3>只重算受影响的部分</h3></div>
+                <label htmlFor="plan-modification">修改要求</label>
+                <textarea id="plan-modification" rows={3} value={modification} onChange={(event) => { setModification(event.target.value); }} />
+                <button className="secondary-button" type="submit" disabled={routeBMutation.isPending}><RefreshCcw size={17} />应用为版本 {planVersion + 1}</button>
+                <p className="helper-text">
+                  {dayTwoWalkingLimit === null
+                    ? "“第二天少走路”只会重算第 2 天；Route A 与未受影响日期保持稳定。"
+                    : `第 2 天已按 ${(dayTwoWalkingLimit / 1000).toFixed(0)} km 局部上限重算；第 1、3 天保持稳定。`}
+                </p>
+              </form>
+              <section className="export-card" aria-labelledby="export-title">
+                <p className="eyebrow">可移交成果</p><h3 id="export-title">导出独立计划</h3>
+                <button className="export-button" type="button" onClick={() => { exportPlan("json"); }}><Download size={17} />导出 JSON</button>
+                <button className="export-button" type="button" onClick={() => { exportPlan("geojson"); }}><Map size={17} />导出 GeoJSON</button>
+                <button className="export-button" type="button" onClick={() => { exportPlan("html"); }}><BookOpenCheck size={17} />打印 HTML</button>
+                <p>JSON 和 GeoJSON 带 schema version；HTML 无外部脚本，可独立打印。</p>
+              </section>
+            </div>
+            <section className="evidence-panel" aria-labelledby="evidence-title">
+              <div className="results-heading"><div><p className="eyebrow">不可信资料 · 已隔离检索</p><h3 id="evidence-title">访问与礼仪依据</h3></div><span className="source-chip">访问日期 · 权威等级</span></div>
+              {evidenceQuery.isPending && <p role="status">正在检索允许的资料命名空间…</p>}
+              {evidenceQuery.isError && <p className="error-state" role="alert">资料检索暂不可用；规则保持未知，请出发前复核。</p>}
+              {evidenceQuery.data?.status === "insufficient_evidence" && <p className="unknown-state">没有足够来源，未生成访问规则。请以场所当日公告为准。</p>}
+              <div className="evidence-list">
+                {evidenceQuery.data?.evidence.map((item) => <article key={item.evidence_id}><div><span>{item.evidence_id}</span><strong>{item.title}</strong></div><p>{item.excerpt}</p><footer><small>权威 {item.authority_level}/5 · 访问 {item.accessed_at} · {item.freshness === "current" ? "当前有效" : "时效未知，需确认"}</small>{item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">查看来源<ExternalLink size={14} /></a>}</footer></article>)}
+              </div>
+            </section>
           </section>
         )}
       </main>

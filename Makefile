@@ -6,7 +6,7 @@ UV ?= uv
 PNPM ?= pnpm
 
 bootstrap:
-	$(UV) sync --extra dev
+	$(UV) sync --extra dev --extra rag
 	$(PNPM) install --frozen-lockfile
 	$(PNPM) --filter @pilgrimage/web exec playwright install chromium
 

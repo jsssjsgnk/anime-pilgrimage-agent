@@ -3,9 +3,11 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from hashlib import sha256
+from pathlib import Path
 from typing import Literal, cast
 from uuid import UUID
 
+from anyio import to_thread
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from langchain_core.runnables import RunnableConfig
@@ -40,6 +42,20 @@ from pilgrimage_agent.planning.demo import fixture_route_a, plan_demo_route_b, p
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.points import build_route_a
 from pilgrimage_agent.providers.service import get_provider_services
+from pilgrimage_agent.rag.embedding import FixtureE5Embedder
+from pilgrimage_agent.rag.evaluation import evaluate
+from pilgrimage_agent.rag.fixtures import load_fixture_index
+from pilgrimage_agent.rag.ingestion import ingest_document
+from pilgrimage_agent.rag.schemas import (
+    IngestedDocument,
+    KnowledgeDeleteResponse,
+    KnowledgeDocument,
+    KnowledgeDocumentInput,
+    KnowledgeQuery,
+    KnowledgeSearchResult,
+    RagEvaluationReport,
+)
+from pilgrimage_agent.rag.sql import SqlRagRepository
 
 
 class HealthResponse(BaseModel):
@@ -62,6 +78,12 @@ app = FastAPI(
     version=__version__,
     description="Read-only planning API; booking and payment are intentionally unsupported.",
 )
+RAG_FIXTURE_ROOT = Path.cwd() / "fixtures" / "rag"
+
+
+def _evaluate_fixture_knowledge() -> RagEvaluationReport:
+    index, queries = load_fixture_index(RAG_FIXTURE_ROOT)
+    return evaluate(index, queries)
 
 
 def _checkpoint_url() -> str:
@@ -90,6 +112,20 @@ async def _workflow_runtime() -> AsyncIterator[tuple[WorkflowGraph, SqlProjectSt
         async with AsyncPostgresSaver.from_conn_string(_checkpoint_url()) as checkpointer:
             await checkpointer.setup()
             yield build_workflow(checkpointer), SqlProjectStore(sessions)
+    finally:
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def _knowledge_repository() -> AsyncIterator[SqlRagRepository]:
+    settings = get_settings()
+    database_url = settings.database_url.get_secret_value()
+    engine = create_async_engine(database_url, pool_pre_ping=True)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        yield SqlRagRepository(
+            sessions, FixtureE5Embedder(), bm25_root=settings.rag_bm25_index_dir
+        )
     finally:
         await engine.dispose()
 
@@ -273,3 +309,56 @@ async def get_workflow(
     if trip is None:
         raise HTTPException(status_code=404, detail="Workflow was not found in this namespace")
     return WorkflowResponse.model_validate(trip.state)
+
+
+@app.post("/api/knowledge/documents", response_model=IngestedDocument)
+async def create_knowledge_document(request: KnowledgeDocumentInput) -> IngestedDocument:
+    ingested = ingest_document(request, FixtureE5Embedder())
+    async with _knowledge_repository() as repository:
+        return await repository.save(ingested)
+
+
+@app.get("/api/knowledge/documents", response_model=tuple[KnowledgeDocument, ...])
+async def list_knowledge_documents(
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    trip_id: UUID | None = None,
+) -> tuple[KnowledgeDocument, ...]:
+    async with _knowledge_repository() as repository:
+        return tuple(await repository.list_documents(owner_user_id, trip_id))
+
+
+@app.get("/api/knowledge/documents/{document_id}", response_model=KnowledgeDocument)
+async def get_knowledge_document(
+    document_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    trip_id: UUID | None = None,
+) -> KnowledgeDocument:
+    async with _knowledge_repository() as repository:
+        document = await repository.get_document(owner_user_id, trip_id, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Knowledge document was not found")
+    return document
+
+
+@app.delete("/api/knowledge/documents/{document_id}", response_model=KnowledgeDeleteResponse)
+async def delete_knowledge_document(
+    document_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    trip_id: UUID | None = None,
+) -> KnowledgeDeleteResponse:
+    async with _knowledge_repository() as repository:
+        deleted = await repository.delete_document(owner_user_id, trip_id, document_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Knowledge document was not found")
+    return KnowledgeDeleteResponse(deleted=True)
+
+
+@app.post("/api/knowledge/search", response_model=KnowledgeSearchResult)
+async def search_knowledge(request: KnowledgeQuery) -> KnowledgeSearchResult:
+    async with _knowledge_repository() as repository:
+        return await repository.search(request)
+
+
+@app.post("/api/knowledge/evaluate", response_model=RagEvaluationReport)
+async def evaluate_knowledge() -> RagEvaluationReport:
+    return await to_thread.run_sync(_evaluate_fixture_knowledge)
