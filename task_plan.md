@@ -4,7 +4,7 @@
 Read the complete required handoff chain, implement and verify all six project phases, and finish only when `make verify-all` passes or a genuine user-only blocker is documented.
 
 ## Current Phase
-Phase 3 — Access/Base planning and deterministic Route B
+Phase 4 — LangGraph, project memory, context, and replanning
 
 ## Phases
 
@@ -27,16 +27,16 @@ Phase 3 — Access/Base planning and deterministic Route B
 - **Status:** complete
 
 ### Phase 3: Access/Base planning and deterministic Route B
-- [ ] Implement the Phase 3 handoff requirements
-- [ ] Run and fix `make verify-phase-3`
-- [ ] Commit the completed phase if Git identity is configured
-- **Status:** in_progress
+- [x] Implement the Phase 3 handoff requirements
+- [x] Run and fix `make verify-phase-3`
+- [x] Commit the completed phase if Git identity is configured
+- **Status:** complete
 
 ### Phase 4: LangGraph, project memory, context, and replanning
 - [ ] Implement the Phase 4 handoff requirements
 - [ ] Run and fix `make verify-phase-4`
 - [ ] Commit the completed phase if Git identity is configured
-- **Status:** pending
+- **Status:** in_progress
 
 ### Phase 5: RAG, complete Web flow, and exports
 - [ ] Implement the Phase 5 handoff requirements
@@ -103,6 +103,11 @@ Phase 3 — Access/Base planning and deterministic Route B
 | First full Phase 2 gate launch used a one-second shell timeout and was terminated before meaningful work | 1 | Re-run the same gate with a long command budget and normal streamed yields |
 | Phase 2 gate reached live smoke but launched it outside the project `.venv`, so imports failed before any network request | 1 | Run the live smoke through locked `uv run python`; no live-call quota was consumed |
 | First SearchAPI live request returned the current documented split airport `date`/`time` shape, which the parser treated as a combined timestamp | 1 | Verify the official response example, combine date/time deterministically, and map `first` to the documented `first_class` request value |
+| First Phase 3 pass found Windows lacks an IANA zoneinfo database and several style-only findings | 1 | Add locked `tzdata`, use an explicit matrix Provider protocol, and apply the narrow Ruff fixes |
+| Phase 3 scenario's 3 km walking cap omitted one point under the deliberately coarse fixture road matrix | 1 | Use a still-low 5 km acceptance cap while retaining the separate hard walking-limit regression |
+| First Phase 3 gate stopped at a single 103-character report string | 1 | Wrap the string and rerun the gate; no integration or external work had started |
+| Phase 3 E2E reached a correct Route B but an assertion matched the selected base in both its control and summary | 1 | Scope the assertion to the Route B region and rerun browser acceptance |
+| Parallel mobile E2E intermittently failed opening distinct screenshot files in the Windows Documents workspace | 1 | Serialize Playwright workers for deterministic artifact writes across desktop/mobile projects |
 
 ## Guardrails
 - Never expose `.env`, secrets, tokens, headers, cookies, or signed MCP URLs.

@@ -15,6 +15,8 @@
 - Official Open-Meteo documentation exposes `GET /v1/forecast`, requires WGS84 latitude/longitude, returns seven days by default and at most sixteen forecast days, and can resolve timestamps with `timezone=auto`; requests beyond that horizon must be reported as unknown/out-of-range rather than invented.
 - Official SearchAPI Google Flights documentation accepts a bearer token in the Authorization header and returns structured flight options. The provider will keep the token out of URLs/logs, expose discovery only, cap live smoke calls, and never follow booking tokens or create purchases.
 - The current official SearchAPI response schema separates each airport's `date` and `time` fields (rather than returning one combined timestamp), and names the first-class request value `first_class`. The real provider now combines those fields deterministically and maps the internal enum explicitly.
+- Official Google Maps URL documentation requires `api=1`, a 2,048-character maximum, percent-encoded coordinates and pipe-separated waypoints, with at most three waypoints on mobile browsers and nine elsewhere. Phase 3 will generate conservative three-waypoint chunks so every link works cross-platform.
+- Official openrouteservice matrix documentation confirms `[longitude, latitude]` locations, paired duration/distance matrices, and a default maximum of 2,500 computed routes. The planner will bound a matrix to 50 locations and use a clearly labelled Haversine estimate when ORS fails.
 - No official public Anitabi API, terms, or robots guidance was discoverable from the official-domain search. The legally safe Phase 2 baseline therefore remains the handoff-authorized imported JSON/GeoJSON provider plus fixtures, with no scraping or access-control bypass.
 - The repository has no existing planning files at task start; `START_HERE.md` and root `AGENTS.md` are present.
 - The Codex task already has an active goal matching the user request.
@@ -66,8 +68,13 @@
 - openrouteservice official API reference: `https://giscience.github.io/openrouteservice/api-reference/`
 - Open-Meteo official forecast documentation: `https://open-meteo.com/en/docs`
 - SearchAPI official Google Flights documentation: `https://www.searchapi.io/docs/google-flights-api`
+- Google Maps URLs official documentation: `https://developers.google.com/maps/documentation/urls/get-started`
+- openrouteservice matrix official documentation: `https://giscience.github.io/openrouteservice/api-reference/endpoints/matrix/`
 
 ## Visual/Browser Findings
+- Phase 3 desktop/mobile screenshots keep the long workflow legible: selection cards clearly show chosen transport/base, the walking-limit control remains visible before generation, and the three-column desktop timeline becomes well-spaced stacked day cards on mobile.
+- In-app browser verification confirmed the Access/Base controls expose checked radio state, Route B reports an ORS road estimate, each day stays at or under the selected 5 km cap, and every navigation link is an encoded `api=1` Google Maps URL.
+- Phase 3 gate passed 11 checks: property-based Route B membership, must/exclude/buffer/timezone/walking constraints, ORS/Haversine paths, Google Maps splitting, relative-date Kyoto→Tokyo scenario, Compose API smoke, and six serialized desktop/mobile E2E cases.
 - Phase 2 desktop and Pixel 7 screenshots show a clean confirmation-to-Route-A flow: the candidate card is visibly selected, the three-point map/list relationship is clear, sources have 44px link targets, and neither viewport has unintended horizontal overflow.
 - In-app browser semantics confirm Route A is absent before explicit confirmation, the selected subject button becomes pressed, the map is labelled with its point count, and all three normalized points expose distinct source links.
 - Phase 2 gate passed all 14 checks. The MCP snapshot contains exactly nine read-only tools, fixture/failure contracts cover success, empty, 429, timeout, and invalid JSON, and the final live run passed Bangumi, openrouteservice, Open-Meteo, and SearchAPI with one request each.

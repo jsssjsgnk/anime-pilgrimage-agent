@@ -17,6 +17,8 @@ from pilgrimage_agent.domain.models import (
     SubjectSearchQuery,
     SubjectSearchResult,
 )
+from pilgrimage_agent.domain.planning import PlanningOptions, RouteBPlan, RouteBRequest
+from pilgrimage_agent.planning.demo import fixture_route_a, plan_demo_route_b, planning_options
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.points import build_route_a
 from pilgrimage_agent.providers.service import get_provider_services
@@ -115,3 +117,14 @@ async def route_a(subject_id: str) -> RouteA:
         PilgrimagePointQuery(subject_id=subject_id, provider="fixture")
     )
     return build_route_a(result, subject_id=subject_id)
+
+
+@app.get("/api/planning/options", response_model=PlanningOptions)
+async def get_planning_options() -> PlanningOptions:
+    return await planning_options()
+
+
+@app.post("/api/subjects/{subject_id}/route-b", response_model=RouteBPlan)
+async def route_b(subject_id: str, request: RouteBRequest) -> RouteBPlan:
+    route = await fixture_route_a(subject_id)
+    return await plan_demo_route_b(route, request)

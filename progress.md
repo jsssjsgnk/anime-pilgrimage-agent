@@ -63,6 +63,20 @@
   - `artifacts/screenshots/phase-2-desktop.png`
   - `artifacts/screenshots/phase-2-mobile.png`
 
+### Phase 3: Access/Base planning and deterministic Route B
+- **Status:** complete
+- Actions taken:
+  - Added strict access, base, visit-window, daily plan, omission, Route B, and validation schemas with timezone-aware constraints.
+  - Added manual intercity real/fixture boundaries, validated flight-to-access normalization, deterministic access comparison, base selection, stable geographic clustering, and daily schedule packing.
+  - Implemented arrival/departure buffers, visit windows, max walking, required/excluded handling, return-to-base accounting, structured omission reasons, and a validator report.
+  - Added ORS matrix integration with clearly labelled Haversine fallback and conservative cross-platform Google Maps URL splitting at three waypoints/2,048 characters.
+  - Added a relative-clock Kyoto→Tokyo three-day scenario plus transport/base selection and timeline UI with on-page source/estimate warnings.
+  - Passed `make verify-phase-3`: 11 checks, seven focused property/scenario/API tests, all 35 aggregate Python tests at 83.2% coverage, and six serialized browser cases.
+- Evidence:
+  - `artifacts/phase-3-report.md`
+  - `artifacts/screenshots/phase-3-desktop.png`
+  - `artifacts/screenshots/phase-3-mobile.png`
+
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
@@ -108,6 +122,11 @@
 | 2026-07-14 | Initial `make verify-phase-2` wrapper was mistakenly given a one-second process timeout | 1 | Relaunching with the gate's required build/E2E time budget |
 | 2026-07-14 | Phase 2 passed static, fixtures, security, Compose, MCP schema, and Route A checks; live script import failed before network activity | 1 | Changed the gate's live launcher to the locked project environment |
 | 2026-07-14 | Bangumi, ORS, and Open-Meteo live smokes passed; SearchAPI's first call exposed split airport date/time fields | 1 | Matched the current official schema and added a regression contract; one of the three allowed SearchAPI calls has been consumed |
+| 2026-07-14 | Initial Phase 3 property/scenario run found Windows had no IANA timezone database; Ruff found ten narrow typing/format issues | 1 | Added locked `tzdata`, made the matrix boundary a Protocol, and corrected formatting/imports |
+| 2026-07-14 | Relative-clock scenario correctly omitted the farthest fixture point at a 3 km cap because the coarse fixture matrix estimated a 4.5 km round trip | 1 | Raised only the acceptance scenario to a still-low 5 km cap; hard walking-limit behavior remains independently tested |
+| 2026-07-14 | First Phase 3 gate stopped immediately on one long report string | 1 | Wrapped the string before any build or browser check ran |
+| 2026-07-14 | Phase 3 Compose/API passed and the UI generated Route B; Playwright's base-text assertion was ambiguous across selection and summary cards | 1 | Scoped all final assertions to the labelled timeline region |
+| 2026-07-14 | Parallel Playwright rerun passed behavior but two mobile workers intermittently could not open distinct screenshot paths | 1 | Set one Playwright worker so artifact writes are deterministic on this Windows Documents volume |
 
 ## 5-Question Reboot Check
 | Question | Answer |

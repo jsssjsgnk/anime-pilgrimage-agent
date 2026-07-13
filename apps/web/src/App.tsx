@@ -1,15 +1,17 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   Check,
   CircleHelp,
   Compass,
+  Footprints,
   ExternalLink,
   Map,
   MapPin,
   MessageSquareText,
   Route,
   ShieldCheck,
+  TrainFront,
 } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -52,6 +54,54 @@ interface RouteAResult {
   warnings: string[];
 }
 
+interface AccessOption {
+  option_id: string;
+  mode: "flight" | "train" | "bus" | "manual";
+  origin: string;
+  destination: string;
+  departure_at: string;
+  arrival_at: string;
+  price: number | null;
+  currency: string | null;
+  provenance: Provenance;
+}
+
+interface BaseCandidate {
+  base_id: string;
+  name: string;
+  provenance: Provenance;
+}
+
+interface PlanningOptions {
+  access_options: AccessOption[];
+  base_candidates: BaseCandidate[];
+  recommended_base_id: string;
+  start_date: string;
+  end_date: string;
+}
+
+interface ScheduledVisit {
+  point_id: string;
+  start_at: string;
+  end_at: string;
+  incoming_distance_meters: number;
+}
+
+interface DayPlan {
+  date: string;
+  visits: ScheduledVisit[];
+  walking_distance_meters: number;
+  maps_urls: string[];
+}
+
+interface RouteBPlan {
+  base: BaseCandidate;
+  days: DayPlan[];
+  omitted_reasons: Record<string, { code: string; detail: string }>;
+  matrix_status: "road" | "straight_line_estimate";
+  access: { inbound: AccessOption; outbound: AccessOption } | null;
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) throw new Error("无法读取已验证的数据，请稍后重试。");
@@ -60,6 +110,19 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 function animeFromRequest(request: string): string {
   return request.match(/[《「](.*?)[》」]/u)?.[1]?.trim() || request.trim();
+}
+
+function timeText(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Tokyo",
+  }).format(new Date(value));
+}
+
+function modeText(mode: AccessOption["mode"]): string {
+  return { flight: "航班", train: "新干线", bus: "夜行巴士", manual: "人工候选" }[mode];
 }
 
 function RouteMap({ points }: { points: Point[] }) {
@@ -122,6 +185,10 @@ export function App() {
   );
   const [submitted, setSubmitted] = useState(false);
   const [confirmedId, setConfirmedId] = useState<string | null>(null);
+  const [inboundId, setInboundId] = useState<string | null>(null);
+  const [outboundId, setOutboundId] = useState<string | null>(null);
+  const [baseId, setBaseId] = useState<string | null>(null);
+  const [walkingLimit, setWalkingLimit] = useState(5_000);
 
   const subjectQuery = useQuery({
     queryKey: ["subjects", animeFromRequest(request)],
@@ -136,13 +203,37 @@ export function App() {
     queryFn: () => fetchJson<RouteAResult>(`/api/subjects/${confirmedId ?? ""}/route-a`),
     enabled: confirmedId !== null,
   });
+  const planningQuery = useQuery({
+    queryKey: ["planning-options"],
+    queryFn: () => fetchJson<PlanningOptions>("/api/planning/options"),
+    enabled: confirmedId !== null,
+  });
+  const routeBMutation = useMutation({
+    mutationFn: () =>
+      fetchJson<RouteBPlan>(`/api/subjects/${confirmedId ?? ""}/route-b`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inbound_option_id: inboundId,
+          outbound_option_id: outboundId,
+          base_id: baseId,
+          max_walking_meters_per_day: walkingLimit,
+          must_visit_point_ids: [],
+          excluded_point_ids: [],
+        }),
+      }),
+  });
 
   const confirmCandidate = async (subjectId: string) => {
     await fetchJson(`/api/subjects/${subjectId}/confirm`, { method: "POST" });
+    routeBMutation.reset();
+    setInboundId(null);
+    setOutboundId(null);
+    setBaseId(null);
     setConfirmedId(subjectId);
   };
 
-  const activeStage = confirmedId ? 2 : submitted ? 1 : 0;
+  const activeStage = routeBMutation.data ? 3 : confirmedId ? 2 : submitted ? 1 : 0;
   const stages = [
     { label: "说出想法", icon: MessageSquareText },
     { label: "确认作品", icon: Check },
@@ -185,9 +276,9 @@ export function App() {
               <div><p className="eyebrow">开放式输入</p><h2 id="request-title">你想怎样巡礼？</h2></div>
               <CircleHelp size={20} aria-label="提示：请包含出发地、日期、作品和偏好" />
             </div>
-            <form onSubmit={(event) => { event.preventDefault(); setConfirmedId(null); setSubmitted(true); }}>
+            <form onSubmit={(event) => { event.preventDefault(); routeBMutation.reset(); setConfirmedId(null); setSubmitted(true); }}>
               <label htmlFor="trip-request">旅行想法</label>
-              <textarea id="trip-request" value={request} onChange={(event) => { setRequest(event.target.value); setSubmitted(false); setConfirmedId(null); }} aria-describedby="trip-request-help" rows={6} />
+              <textarea id="trip-request" value={request} onChange={(event) => { setRequest(event.target.value); setSubmitted(false); setConfirmedId(null); routeBMutation.reset(); }} aria-describedby="trip-request-help" rows={6} />
               <p id="trip-request-help" className="helper-text">建议写明出发地、目的地、日期、作品、预算与步行偏好。任何关键默认值都会显示出来。</p>
               <button className="primary-button" type="submit" disabled={!request.trim()}>整理旅行条件<ArrowRight size={19} aria-hidden="true" /></button>
               <p className="submit-status" aria-live="polite">{submitted ? "已收到。请在候选中明确确认作品；不会静默确认关键选择。" : ""}</p>
@@ -246,6 +337,93 @@ export function App() {
               </ol>
             </div>
             <p className="route-note">这些点尚未按时间删减。下一阶段只会从 Route A 选择可执行子集，并解释每个遗漏。</p>
+          </section>
+        )}
+
+        {confirmedId && planningQuery.data && routeQuery.data && (
+          <section className="access-section" aria-labelledby="access-title">
+            <div className="results-heading">
+              <div><p className="eyebrow">Access / Base Plan</p><h2 id="access-title">选择抵离交通与住宿基地</h2></div>
+              <span className="source-chip">人工候选 · 采用前确认</span>
+            </div>
+            <p className="section-intro">价格和班次是带查询时间的候选，不会触发预订。抵达后预留 90 分钟，离开前预留 120 分钟。</p>
+            <div className="selection-layout">
+              <fieldset className="selection-group">
+                <legend>去程 · 京都 → 东京</legend>
+                {planningQuery.data.access_options.filter((option) => option.destination === "东京").map((option) => (
+                  <button key={option.option_id} className={inboundId === option.option_id ? "option-card selected" : "option-card"} type="button" role="radio" aria-label={`选择去程 ${modeText(option.mode)}`} aria-checked={inboundId === option.option_id} onClick={() => { setInboundId(option.option_id); routeBMutation.reset(); }}>
+                    <span className="option-icon"><TrainFront size={19} /></span>
+                    <span><strong>{modeText(option.mode)}</strong><small>{timeText(option.departure_at)} → {timeText(option.arrival_at)} · {option.price?.toLocaleString("zh-CN")} {option.currency}</small></span>
+                    <Check size={18} className="option-check" />
+                  </button>
+                ))}
+              </fieldset>
+              <fieldset className="selection-group">
+                <legend>返程 · 东京 → 京都</legend>
+                {planningQuery.data.access_options.filter((option) => option.origin === "东京").map((option) => (
+                  <button key={option.option_id} className={outboundId === option.option_id ? "option-card selected" : "option-card"} type="button" role="radio" aria-label={`选择返程 ${modeText(option.mode)}`} aria-checked={outboundId === option.option_id} onClick={() => { setOutboundId(option.option_id); routeBMutation.reset(); }}>
+                    <span className="option-icon"><TrainFront size={19} /></span>
+                    <span><strong>{modeText(option.mode)}</strong><small>{timeText(option.departure_at)} → {timeText(option.arrival_at)} · {option.price?.toLocaleString("zh-CN")} {option.currency}</small></span>
+                    <Check size={18} className="option-check" />
+                  </button>
+                ))}
+              </fieldset>
+              <fieldset className="selection-group">
+                <legend>住宿基地</legend>
+                {planningQuery.data.base_candidates.map((candidate) => (
+                  <button key={candidate.base_id} className={baseId === candidate.base_id ? "option-card selected" : "option-card"} type="button" role="radio" aria-label={`选择基地 ${candidate.name}`} aria-checked={baseId === candidate.base_id} onClick={() => { setBaseId(candidate.base_id); routeBMutation.reset(); }}>
+                    <span className="option-icon"><MapPin size={19} /></span>
+                    <span><strong>{candidate.name}</strong><small>{candidate.base_id === planningQuery.data.recommended_base_id ? "按 Route A 距离推荐" : "可选中心基地"}</small></span>
+                    <Check size={18} className="option-check" />
+                  </button>
+                ))}
+              </fieldset>
+            </div>
+            <div className="planning-action">
+              <label htmlFor="walking-limit"><Footprints size={18} />每日步行上限</label>
+              <select id="walking-limit" value={walkingLimit} onChange={(event) => { setWalkingLimit(Number(event.target.value)); routeBMutation.reset(); }}>
+                <option value={3000}>3 公里 · 极少步行</option>
+                <option value={5000}>5 公里 · 少步行</option>
+                <option value={8000}>8 公里 · 标准</option>
+              </select>
+              <button className="primary-button" type="button" disabled={!inboundId || !outboundId || !baseId || routeBMutation.isPending} onClick={() => { routeBMutation.mutate(); }}>
+                {routeBMutation.isPending ? "正在验证约束…" : "生成可执行 Route B"}<ArrowRight size={19} />
+              </button>
+            </div>
+            {routeBMutation.isError && <p className="error-state" role="alert">{routeBMutation.error.message}</p>}
+          </section>
+        )}
+
+        {routeBMutation.data && routeQuery.data && (
+          <section className="timeline-section" aria-labelledby="timeline-title">
+            <div className="results-heading">
+              <div><p className="eyebrow">确定性验证通过</p><h2 id="timeline-title">Route B · 三日可执行时间轴</h2></div>
+              <span className="source-chip verified">{routeBMutation.data.matrix_status === "road" ? "ORS 道路估算" : "直线估算 · 已降级"}</span>
+            </div>
+            <div className="trip-summary">
+              <div><TrainFront size={20} /><span><small>抵达</small><strong>{timeText(routeBMutation.data.access?.inbound.arrival_at ?? "")}</strong></span></div>
+              <div><MapPin size={20} /><span><small>基地</small><strong>{routeBMutation.data.base.name}</strong></span></div>
+              <div><Footprints size={20} /><span><small>日上限</small><strong>{walkingLimit / 1000} km</strong></span></div>
+            </div>
+            <div className="timeline-grid">
+              {routeBMutation.data.days.map((day, dayIndex) => (
+                <article key={day.date} className="day-card">
+                  <header><span>DAY {String(dayIndex + 1).padStart(2, "0")}</span><div><strong>{day.date}</strong><small>{(day.walking_distance_meters / 1000).toFixed(1)} km 步行估算</small></div></header>
+                  {day.visits.length ? (
+                    <ol>
+                      {day.visits.map((visit) => {
+                        const matchedPoint = routeQuery.data.points.find((point) => point.id === visit.point_id);
+                        return <li key={visit.point_id}><time>{timeText(visit.start_at)}</time><span><strong>{matchedPoint?.name ?? "未知点位"}</strong><small>抵达段 {(visit.incoming_distance_meters / 1000).toFixed(1)} km · 停留 35 分钟</small></span></li>;
+                      })}
+                    </ol>
+                  ) : <p className="rest-day">抵离缓冲日 · 未安排巡礼点</p>}
+                  <footer>
+                    {day.maps_urls.map((url, index) => <a key={url} href={url} target="_blank" rel="noreferrer">现场导航 {index + 1}<ExternalLink size={15} /></a>)}
+                  </footer>
+                </article>
+              ))}
+            </div>
+            <p className="route-note">Route B 仅从 Route A 取点；地图链接用于现场导航，时间和距离仍以 ORS 计划估算为准。出发前请复核交通、天气、营业与拍摄规则。</p>
           </section>
         )}
       </main>

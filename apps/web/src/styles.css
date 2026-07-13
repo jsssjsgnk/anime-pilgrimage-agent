@@ -39,7 +39,8 @@ body {
 }
 
 button,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -423,7 +424,9 @@ textarea:focus {
 }
 
 .results-section,
-.route-section {
+.route-section,
+.access-section,
+.timeline-section {
   margin-top: 20px;
   padding: 24px;
   border: 1px solid var(--line);
@@ -589,6 +592,238 @@ textarea:focus {
   color: #8c2519;
 }
 
+.section-intro {
+  max-width: 760px;
+  color: var(--ink-muted);
+}
+
+.selection-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.selection-group {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.selection-group legend {
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.option-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 72px;
+  padding: 11px;
+  color: var(--ink);
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  cursor: pointer;
+}
+
+.option-card:hover,
+.option-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.option-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: var(--primary);
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.option-card strong,
+.option-card small {
+  display: block;
+}
+
+.option-card small {
+  margin-top: 3px;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.option-check {
+  opacity: 0;
+  color: var(--primary);
+}
+
+.option-card.selected .option-check {
+  opacity: 1;
+}
+
+.planning-action {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #eef3ef;
+}
+
+.planning-action label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.planning-action select {
+  min-height: 48px;
+  padding: 9px 12px;
+  color: var(--ink);
+  border: 1px solid #9aaca3;
+  border-radius: 10px;
+  background: white;
+}
+
+.trip-summary {
+  display: grid;
+  gap: 1px;
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--line);
+}
+
+.trip-summary > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 14px;
+  color: var(--primary);
+  background: white;
+}
+
+.trip-summary small,
+.trip-summary strong {
+  display: block;
+}
+
+.trip-summary small {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.timeline-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.day-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: white;
+}
+
+.day-card header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+  padding: 14px;
+  color: white;
+  background: var(--primary);
+}
+
+.day-card header > span {
+  color: #f2b6a8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.day-card header strong,
+.day-card header small {
+  display: block;
+}
+
+.day-card header small {
+  color: #dcebe4;
+  font-size: 11px;
+}
+
+.day-card ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.day-card li {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 10px;
+  min-height: 76px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.day-card time {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.day-card li strong,
+.day-card li small {
+  display: block;
+}
+
+.day-card li small {
+  margin-top: 3px;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.day-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 52px;
+  padding: 10px 14px;
+  background: #f7f5ef;
+}
+
+.day-card footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.rest-day {
+  min-height: 76px;
+  margin: 0;
+  padding: 20px 14px;
+  color: var(--ink-muted);
+}
+
 @media (min-width: 640px) {
   .topbar {
     padding-inline: 28px;
@@ -610,7 +845,9 @@ textarea:focus {
   .request-card,
   .principles,
   .results-section,
-  .route-section {
+  .route-section,
+  .access-section,
+  .timeline-section {
     padding: 32px;
   }
 
@@ -628,6 +865,17 @@ textarea:focus {
 
   .route-layout {
     grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+  }
+
+  .selection-layout,
+  .timeline-grid,
+  .trip-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .planning-action {
+    grid-template-columns: auto minmax(180px, 0.5fr) auto;
+    align-items: center;
   }
 }
 

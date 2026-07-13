@@ -134,6 +134,35 @@ PHASE_2 = (
     Check("Subject confirmation map E2E", ("pnpm", "test:e2e"), "e2e"),
 )
 
+PHASE_3 = (
+    Check("Python lint", ("uv", "run", "ruff", "check", "."), "static"),
+    Check("Python strict types", ("uv", "run", "mypy"), "static"),
+    Check("Web lint", ("pnpm", "lint"), "static"),
+    Check("Web strict types", ("pnpm", "typecheck"), "static"),
+    Check(
+        "Route B properties and three-day scenario",
+        (
+            "uv",
+            "run",
+            "pytest",
+            "tests/unit/test_phase3_planning.py",
+            "tests/unit/test_phase3_api.py",
+            "tests/contract/test_phase3_scenario.py",
+        ),
+        "fixture",
+    ),
+    Check("Web unit tests", ("pnpm", "test"), "fixture"),
+    Check("Repository secret scan", (sys.executable, "scripts/check_secrets.py"), "security"),
+    Check("Build and start full stack", ("docker", "compose", "up", "-d", "--build"), "compose"),
+    Check("Four-service health", (sys.executable, "scripts/wait_compose.py"), "compose"),
+    Check(
+        "Kyoto-to-Tokyo Route B API scenario",
+        (sys.executable, "scripts/phase3_api_smoke.py"),
+        "integration",
+    ),
+    Check("Access, map, and timeline E2E", ("pnpm", "test:e2e"), "e2e"),
+)
+
 
 def redact(text: str) -> str:
     """Remove likely credential-bearing lines before report/log output."""
@@ -161,7 +190,7 @@ def resolve_command(command: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def run_phase(phase: int) -> bool:
-    phase_checks = {1: PHASE_1, 2: PHASE_2}.get(phase)
+    phase_checks = {1: PHASE_1, 2: PHASE_2, 3: PHASE_3}.get(phase)
     if phase_checks is None:
         ARTIFACTS.mkdir(parents=True, exist_ok=True)
         path = ARTIFACTS / f"phase-{phase}-report.md"
@@ -231,11 +260,15 @@ def run_phase(phase: int) -> bool:
             "- Fixture/unit evidence: Python and Web unit/contract checks above.",
             "- Browser E2E evidence: Playwright report and desktop/mobile screenshots "
             "under `artifacts/`.",
-            (
-                "- Live external API evidence: not part of Phase 1; no live calls were made."
-                if phase == 1
-                else "- Live external API evidence: the separately labelled live smoke row; "
-                "each configured provider is called at most once and SearchAPI at most once."
+            {
+                1: "- Live external API evidence: not part of Phase 1; no live calls were made.",
+                2: "- Live external API evidence: the separately labelled live smoke row; "
+                "each configured provider is called at most once and SearchAPI at most once.",
+            }.get(
+                phase,
+                "- Live external API evidence: no additional live calls were required "
+                "for this phase; "
+                "provider behavior is covered by the prior live gate plus current fixtures.",
             ),
         ]
     )
