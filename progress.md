@@ -463,3 +463,23 @@
 - The first aggregate run passed Phases 1-3 and then exposed a Phase 4 mobile-only MapLibre overlap flake: another marker intercepted the physical click. Batch acceptance now uses the accessible checkbox surface, while scene-detail acceptance dispatches to the selected marker explicitly.
 - Replaced the flaky marker-only detail path with an always-available, collapsible, scrollable “浏览当前地点” list. Desktop/mobile detail acceptance passed 6/6 repeated runs before the aggregate rerun.
 - Final `make verify-all` passed in 436.7 seconds: all six phase reports, 132 Python tests at 80.43% coverage, 6 Web unit tests, 10 desktop/mobile E2E tests, clean Compose recovery, real E5/pgvector checks, secret/privacy scans, and remediation A-J.
+
+### 2026-07-15 - Phase 18 editable work collection
+
+- **Status:** in progress
+- Reproduced the user-visible single-select discrepancy by inspecting the live Web bundle: it is older than the checked-in Phase 17 checkbox implementation.
+- Audited the current workspace mutation surface and confirmed that arbitrary post-creation work addition/removal is not yet implemented end to end.
+- Added Phase 18 to the persistent plan; implementation will cover backend recomputation, consumer controls, regression tests, Compose rebuild, and aggregate verification.
+- The first static-check invocation used the parent PowerShell PATH, where `make` is unavailable. No check ran. Continue through the authorized Conda environment with repository-local TEMP/TMP, matching the existing project workflow.
+- Lint passed. The first strict Web typecheck found exact-optional typing for the edit callback and two legacy test fixtures missing the newly explicit confirmed-ID fields; both were corrected before rerunning.
+- Focused Workspace Agent tests passed 6/6. The direct `conda run pnpm` wrapper then failed while re-emitting a Unicode test name through the legacy GBK console codec; rerun with `PYTHONIOENCODING=utf-8`, as required elsewhere in this project.
+- The next lint pass found only import order, line length, and ambiguous full-width punctuation in the new natural-language collection parser. Converted regex punctuation to explicit Unicode escapes and normalized response punctuation without changing Chinese user copy.
+- Phase 18 focused checks now pass: lint, strict Python/Web typecheck, 7 Workspace Agent/API tests, and 9 Web unit tests. Added direct controls plus natural-language add/remove patch previews and a regression that preserves unaffected subjects/evidence across add-confirm-remove recomputation.
+- Live browser verification found a stale nested-state projection: after adding a new work, an already-confirmed three-season intent displayed only its first candidate as selected because `subject_groups.intent` had not been synchronized with `requirements.subject_intents`. Added compatibility-safe projection synchronization plus persisted synchronization on confirmation.
+- The first Phase 18 browser gate passed desktop. Mobile clicked the context tab before the asynchronous confirmation response finished, then the completed response correctly returned focus to the map tab and hid the assertion target. The test now waits for the post-confirmation planning control before switching tabs and uses a 90-second multi-provider scenario budget.
+- Rebuilt the API/Web Compose images and replaced the stale port-4173 bundle. All four project services are healthy.
+- Live in-app browser verification passed multi-season selection, add preview, add confirmation, preserved prior selections after reload, and version editing. The focused Playwright gate then passed 2/2 on desktop/mobile, including final removal.
+- The first aggregate `make verify-all` stopped in Phase 1 after 135 tests passed because one legacy domain test still asserted the superseded three-intent limit. Updated that invariant to accept twelve and reject the thirteenth; rerun the aggregate gate from the beginning.
+- The second aggregate run passed Phase 1 (136 Python tests, 9 Web tests) and stopped on the old Phase 2 browser copy assertion `2 部作品`. The editable collection now reports the more precise selected-entry count, so the compatibility assertion was updated to `已选 2 个条目` for desktop/mobile.
+- The corrected Phase 2 gate passed, followed by a complete `make verify-all` pass. Final acceptance: 136 Python tests at 81.17% coverage, 9 Web unit tests, 14 desktop/mobile E2E scenarios, clean Compose rebuild/recovery, real E5/pgvector RAG, secret/privacy scans, all six historical phase reports, and remediation scenarios A-J.
+- **Status:** complete; the running stack serves the new Web bundle and all four project services are healthy.

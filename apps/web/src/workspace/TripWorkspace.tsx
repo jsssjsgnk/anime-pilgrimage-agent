@@ -13,10 +13,12 @@ import {
   ListChecks,
   MapPinned,
   MessageSquareText,
+  Plus,
   RefreshCw,
   Route,
   Send,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import maplibregl from "maplibre-gl";
@@ -78,6 +80,9 @@ function strategyLabel(value: string): string {
 }
 
 function operationLabel(operation: { op: string; [key: string]: unknown }) {
+  if (operation.op === "subject_intent") {
+    return operation.action === "add" ? "添加作品" : operation.action === "remove" ? "移除作品" : "调整作品";
+  }
   if (operation.op === "place") {
     const dayLabel = typeof operation.target_day === "number"
       ? operation.target_day.toString()
@@ -221,20 +226,29 @@ function ProgressCounts({ workspace }: { workspace: WorkspaceView }) {
   );
 }
 
-function SubjectConfirmation({ workspace, busy, onConfirm, onRestart }: {
+function SubjectConfirmation({ workspace, busy, onConfirm, onRemove, onRestart, onDone }: {
   workspace: WorkspaceView;
   busy: boolean;
   onConfirm: (choices: Record<string, string[]>) => Promise<void>;
+  onRemove: (intentId: string, query: string) => Promise<void>;
   onRestart: () => void;
+  onDone?: (() => void) | undefined;
 }) {
   const [choices, setChoices] = useState<Record<string, string[]>>(() => Object.fromEntries(
-    workspace.subject_groups.flatMap((group) => group.candidates[0]
-      ? [[group.intent.intent_id, [group.candidates[0].subject_id]]] : []),
+    workspace.subject_groups.flatMap((group) => {
+      if (group.intent.confirmed_subject_ids.length > 0) {
+        return [[group.intent.intent_id, group.intent.confirmed_subject_ids]];
+      }
+      return group.candidates[0]
+        ? [[group.intent.intent_id, [group.candidates[0].subject_id]]]
+        : [];
+    }),
   ));
   const hasMissingCandidates = workspace.subject_groups.some((group) => group.candidates.length === 0);
   const canConfirm = workspace.subject_groups.every(
     (group) => group.candidates.length > 0 && (choices[group.intent.intent_id]?.length ?? 0) > 0,
   );
+  const selectedCount = Object.values(choices).reduce((total, selected) => total + selected.length, 0);
   function toggleCandidate(intentId: string, subjectId: string) {
     setChoices((current) => {
       const selected = current[intentId] ?? [];
@@ -248,13 +262,13 @@ function SubjectConfirmation({ workspace, busy, onConfirm, onRestart }: {
     <section className="mix-confirm-card" aria-labelledby="mix-confirm-title">
       <div className="mix-section-heading">
         <div><span className="mix-kicker">需要你确认</span><h3 id="mix-confirm-title">作品匹配结果</h3></div>
-        <span>{workspace.subject_groups.length} 部作品</span>
+        <span>已选 {selectedCount} 个条目</span>
       </div>
       <p>请勾选你想巡礼的条目；不同季度和剧场版可以同时选择。</p>
       <div className="mix-subject-groups">
         {workspace.subject_groups.map((group) => (
           <fieldset key={group.intent.intent_id}>
-            <legend>{group.intent.query} · 优先级 {group.intent.priority}</legend>
+            <legend><span>{group.intent.query} · 优先级 {group.intent.priority}</span>{workspace.subject_groups.length > 1 && <button className="mix-subject-remove" type="button" disabled={busy} onClick={() => void onRemove(group.intent.intent_id, group.intent.query)}><Trash2 aria-hidden="true" />移除这部作品</button>}</legend>
             {group.candidates.length === 0 && <p className="mix-warning">暂时没有找到匹配作品，请返回修改名称后重试。</p>}
             {group.candidates.length > 1 && (
               <button
@@ -294,7 +308,8 @@ function SubjectConfirmation({ workspace, busy, onConfirm, onRestart }: {
           {busy ? <RefreshCw className="is-spinning" aria-hidden="true" /> : <Check aria-hidden="true" />}
           确认并整理地点
         </button>
-        {hasMissingCandidates && <button className="mix-text-button" type="button" onClick={onRestart}>返回修改作品名称</button>}
+        {onDone && <button className="mix-text-button" type="button" disabled={busy} onClick={onDone}>取消编辑</button>}
+        {hasMissingCandidates && workspace.subject_groups.length === 1 && <button className="mix-text-button" type="button" onClick={onRestart}>返回修改作品名称</button>}
       </div>
     </section>
   );
@@ -321,6 +336,8 @@ export function TripWorkspace() {
   const [evidence, setEvidence] = useState<SceneEvidence[] | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
+  const [editingSubjects, setEditingSubjects] = useState(false);
+  const [newSubject, setNewSubject] = useState("");
 
   useEffect(() => {
     const tripId = window.sessionStorage.getItem(STORAGE_KEY);
@@ -401,6 +418,21 @@ export function TripWorkspace() {
 
   async function confirmSubjects(choices: Record<string, string[]>) {
     if (!workspace) return;
+    const confirmations = workspace.subject_groups.flatMap((group) => {
+      const selected = choices[group.intent.intent_id] ?? [];
+      const current = group.intent.confirmed_subject_ids;
+      const unchanged = selected.length === current.length
+        && selected.every((subjectId) => current.includes(subjectId));
+      return unchanged ? [] : [{
+        intent_id: group.intent.intent_id,
+        decision: "accept",
+        selected_subject_ids: selected,
+      }];
+    });
+    if (confirmations.length === 0) {
+      setEditingSubjects(false);
+      return;
+    }
     setBusy(true); setError(null);
     try {
       const body = await api<WorkspaceView>(`/api/workspaces/${workspace.trip_id}/subjects/confirm`, {
@@ -409,14 +441,10 @@ export function TripWorkspace() {
           owner_user_id: OWNER_ID,
           thread_id: THREAD_ID,
           expected_state_version: workspace.state_version,
-          confirmations: workspace.subject_groups.map((group) => ({
-            intent_id: group.intent.intent_id,
-            decision: "accept",
-            selected_subject_ids: choices[group.intent.intent_id],
-          })),
+          confirmations,
         }),
       });
-      setWorkspace(body); setAreaFilter(preferredAreaId(body)); setActiveStage("map");
+      setWorkspace(body); setAreaFilter(preferredAreaId(body)); setActiveStage("map"); setEditingSubjects(false); setEvidence(null);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "确认失败"); }
     finally { setBusy(false); }
   }
@@ -490,6 +518,53 @@ export function TripWorkspace() {
     finally { setBusy(false); }
   }
 
+  async function previewSubjectPatch(action: "add" | "remove", value: string, query?: string) {
+    if (!workspace) return;
+    const normalizedQuery = value.trim();
+    if (action === "add" && !normalizedQuery) return;
+    const operation = action === "add" ? {
+      op: "subject_intent",
+      action: "add",
+      intent: {
+        intent_id: crypto.randomUUID(),
+        query: normalizedQuery,
+        confirmed_subject_id: null,
+        confirmed_subject_ids: [],
+        priority: 3,
+        minimum_place_count: null,
+        is_primary: false,
+        status: "proposed",
+      },
+    } : { op: "subject_intent", action: "remove", intent_id: value };
+    const label = action === "add" ? normalizedQuery : query ?? "这部作品";
+    const patch: PlanPatch = {
+      patch_id: crypto.randomUUID(),
+      trip_id: workspace.trip_id,
+      expected_base_version: workspace.state_version,
+      rationale: action === "add" ? `添加作品《${label}》并核对匹配条目` : `从本次巡礼中移除《${label}》`,
+      requires_confirmation: true,
+      status: "proposed",
+      idempotency_key: `web-subject:${crypto.randomUUID()}`,
+      created_at: new Date().toISOString(),
+      operations: [operation],
+    };
+    setBusy(true); setError(null);
+    try {
+      const body = await api<PatchPreview>(`/api/workspaces/${workspace.trip_id}/patches/preview`, {
+        method: "POST",
+        body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, patch }),
+      });
+      setWorkspace(body.workspace); setPreview(body.preview);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法预览作品修改"); }
+    finally { setBusy(false); }
+  }
+
+  async function addSubject(event: FormEvent) {
+    event.preventDefault();
+    if (!newSubject.trim()) return;
+    await previewSubjectPatch("add", newSubject);
+  }
+
   async function applyPatch() {
     if (!workspace || !preview) return;
     setBusy(true); setError(null);
@@ -498,7 +573,12 @@ export function TripWorkspace() {
         method: "POST",
         body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, confirm: preview.impact.confirmation_required }),
       });
-      setWorkspace(body); setPreview(null); setSelectedPlaceIds(new Set());
+      setWorkspace(body); setPreview(null); setSelectedPlaceIds(new Set()); setEvidence(null);
+      if (body.status === "awaiting_subject_confirmation") {
+        setEditingSubjects(true);
+        setActiveStage("map");
+      }
+      setNewSubject("");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "应用修改失败"); }
     finally { setBusy(false); }
   }
@@ -622,8 +702,8 @@ export function TripWorkspace() {
           ) : (
             <>
               <ProgressCounts workspace={workspace} />
-          {workspace.status === "awaiting_subject_confirmation" ? (
-            <SubjectConfirmation workspace={workspace} busy={busy} onConfirm={confirmSubjects} onRestart={reset} />
+          {workspace.status === "awaiting_subject_confirmation" || editingSubjects ? (
+            <SubjectConfirmation key={workspace.state_version} workspace={workspace} busy={busy} onConfirm={confirmSubjects} onRemove={(intentId, query) => previewSubjectPatch("remove", intentId, query)} onRestart={reset} onDone={workspace.status === "awaiting_subject_confirmation" ? undefined : () => setEditingSubjects(false)} />
           ) : (
             <>
               <div className="mix-canvas-toolbar">
@@ -680,6 +760,7 @@ export function TripWorkspace() {
           {!workspace ? <p className="mix-muted">开始规划后，这里会显示日期、住宿、行程版本和资料说明。</p> : (
             <>
               <section className="mix-context-block"><h3><CalendarDays aria-hidden="true" />行程范围</h3><dl><div><dt>日期</dt><dd>{workspace.requirements.start_date ?? "未定"} — {workspace.requirements.end_date ?? "未定"}</dd></div><div><dt>作品</dt><dd>{workspace.confirmed_subjects.length} 个条目已确认</dd></div><div><dt>住宿基点</dt><dd>{workspace.base_candidates.find((base) => base.base_id === workspace.selected_base_id)?.name ?? "待选择"}</dd></div></dl></section>
+              <section className="mix-context-block mix-work-manager"><h3><MapPinned aria-hidden="true" />作品管理</h3><ul>{workspace.requirements.subject_intents.map((intent) => <li key={intent.intent_id}><span><strong>{intent.query}</strong><small>{intent.confirmed_subject_ids.length ? `${intent.confirmed_subject_ids.length} 个条目` : "等待确认"}</small></span>{workspace.requirements.subject_intents.length > 1 && <button type="button" aria-label={`移除作品 ${intent.query}`} disabled={busy} onClick={() => void previewSubjectPatch("remove", intent.intent_id, intent.query)}><Trash2 aria-hidden="true" /></button>}</li>)}</ul><div className="mix-work-manager-actions"><button type="button" disabled={busy} onClick={() => { setEditingSubjects(true); setActiveStage("map"); }}>编辑已选版本</button><form onSubmit={(event) => void addSubject(event)}><label htmlFor="mix-add-subject">添加作品</label><div><input id="mix-add-subject" value={newSubject} onChange={(event) => setNewSubject(event.target.value)} placeholder="输入作品名称" maxLength={100} disabled={busy || workspace.requirements.subject_intents.length >= 12} /><button type="submit" disabled={busy || !newSubject.trim() || workspace.requirements.subject_intents.length >= 12}><Plus aria-hidden="true" />添加</button></div></form></div>{workspace.requirements.subject_intents.length >= 12 && <p className="mix-muted">一个工作区最多管理 12 部作品；可以先移除不需要的作品再添加。</p>}</section>
               <section className="mix-context-block"><h3><Clock3 aria-hidden="true" />修改记录</h3><ul className="mix-event-list">{workspace.diffs.slice().reverse().map((diff) => <li key={`${diff.from_version}-${diff.to_version}`}><span>行程版本 {diff.to_version}</span><small>{diff.changed_day_numbers.length ? `调整第 ${diff.changed_day_numbers.join("、")} 天` : "更新了行程要求"}</small></li>)}</ul>{workspace.diffs.length === 0 && <p className="mix-muted">还没有修改记录。</p>}</section>
               <section className="mix-context-block"><h3><GitCompareArrows aria-hidden="true" />行程版本</h3><ul className="mix-version-list">{workspace.itineraries.slice(0, 6).map((item) => <li key={item.itinerary_id}><strong>v{item.version}</strong><span>{strategyLabel(item.strategy)}</span><small>{item.days.reduce((total, day) => total + day.visits.length, 0)} 个地点{item.validation_issues.length ? ` · ${item.validation_issues.length} 项需调整` : " · 安排可行"}</small></li>)}</ul></section>
               <section className="mix-context-block"><button className="mix-disclosure" onClick={() => setShowEvidence((value) => !value)} aria-expanded={showEvidence}><Layers3 aria-hidden="true" />资料说明 <span>{workspace.counts.raw_scene_records}</span></button>{showEvidence && <div className="mix-evidence-summary"><p>已整理 {workspace.counts.raw_scene_records} 条场景资料，形成 {workspace.counts.canonical_places} 个巡礼地点。</p>{workspace.counts.quarantined_records > 0 && <p>{workspace.counts.quarantined_records} 条资料因位置不明确而未加入地图。</p>}<p>出发前请再次确认开放时间和现场规则。</p></div>}</section>

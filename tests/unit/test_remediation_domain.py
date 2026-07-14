@@ -63,7 +63,7 @@ def test_legacy_query_maps_to_one_stable_primary_subject_intent() -> None:
     assert first.primary_subject_query == "孤独摇滚"
 
 
-def test_trip_request_requires_one_primary_and_at_most_three_intents() -> None:
+def test_trip_request_requires_one_primary_and_at_most_twelve_intents() -> None:
     with pytest.raises(ValidationError, match="one and only one"):
         TripRequest(
             subject_intents=(
@@ -75,7 +75,7 @@ def test_trip_request_requires_one_primary_and_at_most_three_intents() -> None:
         TripRequest(
             subject_intents=tuple(
                 SubjectIntent(query=str(index), is_primary=index == 0)
-                for index in range(4)
+                for index in range(13)
             )
         )
 

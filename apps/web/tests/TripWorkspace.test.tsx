@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TripWorkspace } from "../src/workspace/TripWorkspace";
-import type { WorkspaceView } from "../src/workspace/types";
+import type { PlanPatch, WorkspaceView } from "../src/workspace/types";
 
 const tripId = "00000000-0000-4000-8000-000000000201";
 const intentId = "00000000-0000-4000-8000-000000000202";
@@ -18,10 +18,10 @@ function workspace(status: string, version: number): WorkspaceView {
       start_date: "2030-09-01",
       end_date: "2030-09-03",
       walking_preference: "medium",
-      subject_intents: [{ intent_id: intentId, query: "孤独摇滚！", priority: 5, is_primary: true, status: status === "awaiting_subject_confirmation" ? "proposed" : "confirmed" }],
+      subject_intents: [{ intent_id: intentId, query: "孤独摇滚！", priority: 5, is_primary: true, status: status === "awaiting_subject_confirmation" ? "proposed" : "confirmed", confirmed_subject_id: status === "awaiting_subject_confirmation" ? null : subject.subject_id, confirmed_subject_ids: status === "awaiting_subject_confirmation" ? [] : [subject.subject_id] }],
     },
     subject_groups: [{
-      intent: { intent_id: intentId, query: "孤独摇滚！", priority: 5, is_primary: true, status: "proposed" },
+      intent: { intent_id: intentId, query: "孤独摇滚！", priority: 5, is_primary: true, status: "proposed", confirmed_subject_id: null, confirmed_subject_ids: [] },
       candidates: [subject], status: "ok", warning: null,
     }],
     confirmed_subjects: status === "awaiting_subject_confirmation" ? [] : [{ intent_id: intentId, subject, evidence_status: "ok" }],
@@ -80,7 +80,7 @@ describe("TripWorkspace", () => {
     const started = {
       ...workspace("awaiting_subject_confirmation", 1),
       subject_groups: [{
-        intent: { intent_id: intentId, query: "轻音少女", priority: 5, is_primary: true, status: "proposed" },
+        intent: { intent_id: intentId, query: "轻音少女", priority: 5, is_primary: true, status: "proposed", confirmed_subject_id: null, confirmed_subject_ids: [] },
         candidates: seasons, status: "ok", warning: null,
       }],
     };
@@ -118,7 +118,7 @@ describe("TripWorkspace", () => {
     const started = {
       ...workspace("awaiting_subject_confirmation", 1),
       subject_groups: [{
-        intent: { intent_id: intentId, query: "无法识别的作品", priority: 5, is_primary: true, status: "proposed" },
+        intent: { intent_id: intentId, query: "无法识别的作品", priority: 5, is_primary: true, status: "proposed", confirmed_subject_id: null, confirmed_subject_ids: [] },
         candidates: [], status: "not_found", warning: "没有找到候选",
       }],
     };
@@ -172,6 +172,55 @@ describe("TripWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认并重新规划" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("adds and removes works from an existing workspace with explicit previews", async () => {
+    window.sessionStorage.setItem("pilgrimage-workspace-v2", tripId);
+    const secondIntentId = "00000000-0000-4000-8000-000000000211";
+    const existing = workspace("planned", 7);
+    existing.requirements.subject_intents.push({
+      intent_id: secondIntentId, query: "莉可丽丝", priority: 3, is_primary: false,
+      status: "confirmed", confirmed_subject_id: "lycoris", confirmed_subject_ids: ["lycoris"],
+    });
+    const previewBodies: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL ? input.href : input.url;
+      if (url.includes("/messages") && !init?.method) return json([]);
+      if (!init?.method) return json(existing);
+      if (url.includes("/patches/preview")) {
+        if (typeof init.body !== "string") throw new Error("Expected a patch body");
+        const request = JSON.parse(init.body) as { patch: PlanPatch };
+        previewBodies.push(request.patch.operations[0]);
+        return json({
+          workspace: existing,
+          preview: {
+            patch: request.patch,
+            impact: { patch_id: request.patch.patch_id, confirmation_required: true },
+          },
+        });
+      }
+      throw new Error(`unexpected ${url} ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TripWorkspace />);
+
+    const addInput = await screen.findByLabelText("添加作品");
+    fireEvent.change(addInput, { target: { value: "天气之子" } });
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    expect(await screen.findByRole("dialog", { name: "应用这次修改？" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(screen.getByRole("button", { name: "移除作品 莉可丽丝" }));
+    expect(await screen.findByRole("dialog", { name: "应用这次修改？" })).toBeVisible();
+
+    expect(previewBodies).toHaveLength(2);
+    expect(previewBodies[0]).toMatchObject({
+      op: "subject_intent", action: "add", intent: { query: "天气之子" },
+    });
+    expect(previewBodies[1]).toEqual({
+      op: "subject_intent", action: "remove", intent_id: secondIntentId,
+    });
   });
 
   it("restores the trip-scoped workspace after reload", async () => {

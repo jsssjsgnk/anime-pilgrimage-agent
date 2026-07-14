@@ -12,13 +12,14 @@ For clean acceptance, the Phase 6 gate removes only this Compose project's named
 ## Walkthrough
 
 1. Open `http://localhost:4173`. In “你的巡礼想法”, describe multiple works and the trip pace naturally, then select the dates and start planning.
-2. Confirm the matched works once. The interface must not show catalog/provider names, workspace IDs, raw states, role handoffs, or patch internals.
-3. Verify the compact map shows the sourced places. Click a point and inspect the work, episode/time reference, scene image when available, and its source link.
-4. Choose “批量选择”. Tick three or more places from the scrollable list (or use “全选当前列表”), then preview one combined add, exclude, or move-to-day change.
-5. Generate the multi-day itinerary. Verify the map defaults to scheduled places and each day shows its ordered visits and walking distance.
-6. Return to the same conversation and send “我想每天少走一点”. Confirm the human-readable change preview, apply it, and verify a new itinerary version appears.
-7. Refresh the browser. Verify the original request, subsequent conversation, selected plan, and pending preview (if any) recover without exposing internal diagnostics.
-8. Repeat the workflow in a mobile viewport; the title confirmation automatically opens the map panel, the map remains compact, and batch selection does not depend on tapping overlapping markers.
+2. Candidate entries use checkboxes: seasons, films, and related entries can be selected together. After confirmation, use “作品管理” to add another title, edit selected versions, or remove a title without restarting the workspace. The same changes can be previewed through natural messages such as `添加《作品名》` and `移除《作品名》`.
+3. Confirm the matched works once. The interface must not show catalog/provider names, workspace IDs, raw states, role handoffs, or patch internals.
+4. Verify the compact map shows the sourced places. Click a point and inspect the work, episode/time reference, scene image when available, and its source link.
+5. Choose “批量选择”. Tick three or more places from the scrollable list (or use “全选当前列表”), then preview one combined add, exclude, or move-to-day change.
+6. Generate the multi-day itinerary. Verify the map defaults to scheduled places and each day shows its ordered visits and walking distance.
+7. Return to the same conversation and send “我想每天少走一点”. Confirm the human-readable change preview, apply it, and verify a new itinerary version appears.
+8. Refresh the browser. Verify the original request, subsequent conversation, selected plan, and pending preview (if any) recover without exposing internal diagnostics.
+9. Repeat the workflow in a mobile viewport; the title confirmation automatically opens the map panel, the map remains compact, and batch selection does not depend on tapping overlapping markers.
 
 Automated equivalent:
 

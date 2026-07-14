@@ -172,7 +172,7 @@ class TripCandidateGraph(StrictModel):
     graph_id: UUID = Field(default_factory=uuid4)
     trip_id: UUID
     version: int = Field(ge=1)
-    subject_intent_ids: tuple[UUID, ...] = Field(min_length=1, max_length=3)
+    subject_intent_ids: tuple[UUID, ...] = Field(min_length=1, max_length=12)
     place_ids: tuple[UUID, ...]
     area_ids: tuple[UUID, ...]
     decisions: tuple[CandidateDecision, ...]

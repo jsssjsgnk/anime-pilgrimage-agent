@@ -145,6 +145,15 @@ Phase 17 in progress — arbitrary work discovery and recovery
 - [x] Run focused gates plus `make verify-all`, then commit and push
 - **Status:** complete (`make verify-all` PASS; committed and pushed in this handoff)
 
+### Phase 18: Freely editable multi-work collection
+- [x] Reproduce why the running UI still presents single-select candidates
+- [x] Make candidate versions genuinely multi-select with clear selected counts
+- [x] Add persistent add-work and remove-work operations before and after planning
+- [x] Preserve remaining works, evidence, places, and itinerary state across collection edits
+- [x] Add API, unit, and browser regressions for add/remove/re-add flows
+- [x] Rebuild the running stack, run focused gates and `make verify-all`, then commit and push
+- **Status:** complete (`make verify-all` PASS; commit and push follow in this handoff)
+
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
 2. What code already exists, and which unrelated user changes must be preserved?

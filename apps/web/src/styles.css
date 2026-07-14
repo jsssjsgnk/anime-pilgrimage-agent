@@ -1518,7 +1518,7 @@ textarea:focus {
 .mix-confirm-card > p { color: var(--mix-muted); font-size: 14px; }
 .mix-subject-groups { display: grid; gap: 14px; margin: 20px 0; }
 .mix-subject-groups fieldset { display: grid; gap: 6px; margin: 0; padding: 12px; border: 1px solid var(--mix-line); border-radius: 13px; }
-.mix-subject-groups legend { padding: 0 5px; font-size: 13px; font-weight: 800; }
+.mix-subject-groups legend { display: flex; width: calc(100% - 10px); align-items: center; justify-content: space-between; gap: 12px; padding: 0 5px; font-size: 13px; font-weight: 800; }
 .mix-subject-groups label { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; min-height: 52px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; cursor: pointer; }
 .mix-subject-groups label.is-selected { border-color: #82aa9b; background: var(--mix-primary-soft); }
 .mix-subject-groups label span { display: grid; }
@@ -1526,6 +1526,8 @@ textarea:focus {
 .mix-subject-groups label svg { width: 17px; color: var(--mix-primary); opacity: 0; }
 .mix-subject-groups label.is-selected svg { opacity: 1; }
 .mix-subject-select-all { justify-self: start; min-height: 36px; padding: 6px 9px; border: 1px solid var(--mix-line); border-radius: 8px; background: white; color: var(--mix-primary); font-size: 12px; font-weight: 750; cursor: pointer; }
+.mix-subject-remove { display: inline-flex; min-height: 44px; align-items: center; gap: 5px; padding: 6px 9px; border: 0; background: transparent; color: var(--mix-accent); font: inherit; font-size: 12px; cursor: pointer; }
+.mix-subject-remove svg { width: 15px; }
 .mix-confirm-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .mix-confirm-actions .mix-text-button { margin: 0; }
 .mix-warning { color: #8a570e; }
@@ -1550,6 +1552,22 @@ textarea:focus {
 .mix-context-block dl div { display: grid; gap: 2px; }
 .mix-context-block dt { color: var(--mix-muted); font-size: 11px; }
 .mix-context-block dd { margin: 0; font-size: 12px; font-weight: 700; }
+.mix-work-manager > ul { display: grid; gap: 6px; margin: 0 0 12px; padding: 0; list-style: none; }
+.mix-work-manager > ul li { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; border: 1px solid var(--mix-line); border-radius: 9px; background: white; }
+.mix-work-manager > ul span { display: grid; min-width: 0; }
+.mix-work-manager > ul strong { overflow-wrap: anywhere; font-size: 12px; }
+.mix-work-manager > ul small { color: var(--mix-muted); font-size: 11px; }
+.mix-work-manager > ul button { display: inline-grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--mix-accent); cursor: pointer; }
+.mix-work-manager > ul button svg { width: 17px; }
+.mix-work-manager-actions { display: grid; gap: 10px; }
+.mix-work-manager-actions > button { min-height: 44px; border: 1px solid var(--mix-line); border-radius: 9px; background: white; color: var(--mix-primary); font-weight: 750; cursor: pointer; }
+.mix-work-manager-actions form { display: grid; gap: 5px; }
+.mix-work-manager-actions form > label { color: var(--mix-muted); font-size: 11px; font-weight: 700; }
+.mix-work-manager-actions form > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.mix-work-manager-actions input { min-width: 0; min-height: 44px; padding: 8px 10px; border: 1px solid var(--mix-line); border-radius: 9px; background: white; color: var(--mix-ink); font: inherit; font-size: 13px; }
+.mix-work-manager-actions form button { display: inline-flex; min-height: 44px; align-items: center; gap: 5px; padding: 8px 11px; border: 0; border-radius: 9px; background: var(--mix-primary); color: white; font-weight: 800; cursor: pointer; }
+.mix-work-manager-actions form button svg { width: 16px; }
+.mix-work-manager button:disabled { cursor: not-allowed; opacity: .45; }
 .mix-event-list { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
 .mix-event-list li { display: grid; gap: 2px; padding-left: 11px; border-left: 2px solid #9bb7ac; font-size: 12px; }
 .mix-event-list small, .mix-muted { color: var(--mix-muted); font-size: 11px; }

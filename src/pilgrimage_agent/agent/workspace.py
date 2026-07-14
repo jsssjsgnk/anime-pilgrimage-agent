@@ -136,7 +136,7 @@ class ConfirmWorkspaceSubjectsRequest(StrictModel):
     owner_user_id: str = Field(min_length=1, max_length=120)
     thread_id: str = Field(min_length=1, max_length=120)
     expected_state_version: int = Field(ge=1)
-    confirmations: tuple[SubjectConfirmation, ...] = Field(min_length=1, max_length=3)
+    confirmations: tuple[SubjectConfirmation, ...] = Field(min_length=1, max_length=12)
 
 
 class PlanWorkspaceRequest(StrictModel):
@@ -266,13 +266,22 @@ def workspace_view(state: WorkspaceState) -> WorkspaceView:
         if state.candidate_graph
         else len(state.places)
     )
+    intent_by_id = {
+        item.intent_id: item for item in state.requirements.subject_intents
+    }
+    projected_groups = tuple(
+        group.model_copy(
+            update={"intent": intent_by_id.get(group.intent.intent_id, group.intent)}
+        )
+        for group in state.subject_groups
+    )
     return WorkspaceView(
         thread_id=state.thread_id,
         trip_id=state.trip_id,
         state_version=state.state_version,
         status=state.status,
         requirements=state.requirements,
-        subject_groups=state.subject_groups,
+        subject_groups=projected_groups,
         confirmed_subjects=state.confirmed_subjects,
         places=state.places,
         areas=state.areas,
@@ -336,7 +345,7 @@ def _handoff(
 
 
 def _multi_subject_request(request: TripRequest, summary: str) -> TripRequest:
-    titles = tuple(dict.fromkeys(item.strip() for item in _TITLE.findall(summary)))[:3]
+    titles = tuple(dict.fromkeys(item.strip() for item in _TITLE.findall(summary)))[:12]
     if len(titles) <= 1 or len(request.subject_intents) > 1:
         return request
     primary_title = next(
@@ -497,8 +506,14 @@ class WorkspaceAgent:
         if not set(confirmation_by_intent).issubset(group_by_intent):
             raise ValueError("confirmation references an unknown subject intent")
         run_id = uuid4()
-        confirmed: list[ConfirmedWorkspaceSubject] = []
-        evidence: list[SceneEvidence] = []
+        changed_intent_ids = set(confirmation_by_intent)
+        confirmed: list[ConfirmedWorkspaceSubject] = [
+            item for item in state.confirmed_subjects if item.intent_id not in changed_intent_ids
+        ]
+        preserved_subject_ids = {item.subject.subject_id for item in confirmed}
+        evidence: list[SceneEvidence] = [
+            item for item in state.evidence if item.subject_id in preserved_subject_ids
+        ]
         warnings = list(state.warnings)
         handoffs = list(state.handoffs)
         updated_intents: list[SubjectIntent] = []
@@ -601,6 +616,19 @@ class WorkspaceAgent:
         requirements = state.requirements.model_copy(
             update={"subject_intents": tuple(updated_intents)}
         )
+        updated_intent_by_id = {
+            item.intent_id: item for item in requirements.subject_intents
+        }
+        groups = tuple(
+            group.model_copy(
+                update={
+                    "intent": updated_intent_by_id.get(
+                        group.intent.intent_id, group.intent
+                    )
+                }
+            )
+            for group in state.subject_groups
+        )
         places: tuple[VisitPlace, ...] = ()
         areas: tuple[AreaCluster, ...] = ()
         quarantined: tuple[EvidenceQuarantine, ...] = ()
@@ -635,11 +663,17 @@ class WorkspaceAgent:
             WorkspaceStatus.PARTIAL_READY if places and partial else
             WorkspaceStatus.READY if places else WorkspaceStatus.PARTIAL
         )
-        return state.model_copy(
+        selected_base_id = (
+            state.selected_base_id
+            if state.selected_base_id in {item.base_id for item in bases}
+            else bases[0].base_id if bases else None
+        )
+        prepared = state.model_copy(
             update={
                 "state_version": state.state_version + 1,
                 "status": status,
                 "requirements": requirements,
+                "subject_groups": groups,
                 "confirmed_subjects": tuple(confirmed),
                 "evidence": tuple(evidence),
                 "quarantined": quarantined,
@@ -647,10 +681,23 @@ class WorkspaceAgent:
                 "places": places,
                 "areas": areas,
                 "base_candidates": bases,
+                "selected_base_id": selected_base_id,
+                "candidate_graph": None,
+                "itineraries": (),
                 "handoffs": tuple(handoffs),
                 "warnings": tuple(warnings),
             }
         )
+        if state.itineraries and places and areas and selected_base_id:
+            return self._execute_plan(
+                prepared.model_copy(update={"itineraries": state.itineraries}),
+                base_id=selected_base_id,
+                access=state.selected_access,
+                timezone=state.itineraries[0].timezone,
+                strategies=state.planning_strategies,
+                next_version=state.state_version + 1,
+            )
+        return prepared
 
     def _execute_plan(
         self,
@@ -904,8 +951,8 @@ class WorkspaceAgent:
             elif isinstance(operation, SubjectIntentOperation):
                 if operation.action == "add":
                     assert operation.intent is not None
-                    if len(intents) >= 3:
-                        raise ValueError("a workspace supports at most three subjects")
+                    if len(intents) >= 12:
+                        raise ValueError("a workspace supports at most twelve subjects")
                     if any(item.query == operation.intent.query for item in intents):
                         raise ValueError("subject intent already exists")
                     intents.append(operation.intent)
@@ -1160,12 +1207,8 @@ class WorkspaceAgent:
                         if added_unconfirmed
                         else WorkspaceStatus.PARTIAL
                     ),
-                    "candidate_graph": (
-                        None
-                        if recurate or added_unconfirmed
-                        else state.candidate_graph
-                    ),
-                    "itineraries": () if recurate or added_unconfirmed else state.itineraries,
+                    "candidate_graph": None if recurate else state.candidate_graph,
+                    "itineraries": () if recurate else state.itineraries,
                 }
             )
         after_codes = tuple(

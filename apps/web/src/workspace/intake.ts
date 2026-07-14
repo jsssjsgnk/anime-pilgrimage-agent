@@ -12,7 +12,7 @@ function cleanTitle(value: string): string {
 }
 
 function uniqueTitles(values: string[]): string[] {
-  return [...new Set(values.map(cleanTitle).filter((value) => value.length > 0 && value.length <= 100))].slice(0, 3);
+  return [...new Set(values.map(cleanTitle).filter((value) => value.length > 0 && value.length <= 100))].slice(0, 12);
 }
 
 export function extractSubjectQueries(input: string): string[] {

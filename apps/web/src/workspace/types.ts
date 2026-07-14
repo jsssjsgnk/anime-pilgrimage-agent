@@ -1,6 +1,7 @@
 export interface Coordinate { latitude: number; longitude: number }
 export interface SubjectIntent {
   intent_id: string; query: string; priority: number; is_primary: boolean; status: string;
+  confirmed_subject_id: string | null; confirmed_subject_ids: string[];
 }
 export interface SubjectCandidate {
   subject_id: string; name: string; name_cn: string | null; aliases: string[];

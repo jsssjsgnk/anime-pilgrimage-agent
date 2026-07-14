@@ -89,7 +89,7 @@ class TripRequest(StrictModel):
     start_date: date | None = None
     end_date: date | None = None
     anime_query: str | None = Field(default=None, max_length=200)
-    subject_intents: tuple[SubjectIntent, ...] = Field(default=(), max_length=3)
+    subject_intents: tuple[SubjectIntent, ...] = Field(default=(), max_length=12)
     budget_level: Literal["low", "medium", "high"] | None = None
     walking_preference: Literal["low", "medium", "high"] | None = None
     max_walking_meters_per_day: float | None = Field(default=None, gt=0, le=50_000)

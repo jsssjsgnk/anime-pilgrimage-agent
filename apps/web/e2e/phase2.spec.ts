@@ -5,7 +5,7 @@ import { startWorkspace } from "./workspace-flow";
 
 test("natural multi-work request requires one explicit confirmation", async ({ page }, testInfo) => {
   await startWorkspace(page);
-  await expect(page.getByText("2 部作品")).toBeVisible();
+  await expect(page.getByText("已选 2 个条目")).toBeVisible();
   await expect(page.getByText(/目录条目|Provider|Anitabi/u)).toHaveCount(0);
   await page.getByRole("button", { name: "确认并整理地点" }).click();
   await expect(page.getByRole("button", { name: "生成层级行程" })).toBeVisible({ timeout: 30_000 });

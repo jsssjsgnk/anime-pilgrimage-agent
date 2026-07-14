@@ -319,3 +319,14 @@
 - Dense map markers can overlap on mobile even when they are individually present in the DOM. A batch workflow therefore needs a non-map selection surface; the implemented checkbox list makes multi-point selection deterministic and keyboard accessible.
 - Persisted assistant copy is part of the visible UI boundary. Hiding a diagnostics panel was insufficient because the message endpoint still named internal patch and planner nodes; the endpoint now emits only user-facing change guidance.
 - A compact map can remain useful without being the sole navigation surface. The final design keeps marker interaction, adds a collapsed point browser for deterministic detail access, and exposes checkboxes only in batch mode, avoiding a permanently oversized list.
+
+## 2026-07-15 Phase 18 editable work collection diagnosis
+
+- The checked-in Phase 17 source already renders candidate entries as checkboxes and includes “选择全部季度与版本”, but the JavaScript bundle currently served on port 4173 does not contain that label. The running Web container is stale, which explains the radio controls in the user screenshot.
+- This is not only a stale-build issue. The product model currently bounds a workspace to 1–3 initial subject intents and provides no consumer-facing add/remove endpoints after creation or planning.
+- `SubjectIntentOperation` exists in the generic PlanPatch schema, but the workspace apply path does not yet rebuild catalog groups, evidence, canonical places, areas, candidate graph, or itineraries for collection edits. Exposing it directly would therefore be misleading.
+- The correction must treat works as a persistently editable collection: add by natural title search, confirm one or more matching seasons/films, remove explicitly, preserve unaffected confirmed subjects, rebuild derived geography, and invalidate/regenerate itinerary versions honestly.
+- UI acceptance follows the existing design system: native checkboxes, visible selected counts, 44px actions, explicit destructive wording, keyboard operation, and equivalent desktop/mobile controls.
+- Live product verification confirmed three K-On entries can remain selected while adding one Bocchi entry. The combined workspace changed from 178 scene records / 138 places / 30 areas to 252 records / 195 places / 43 areas, then editing out the K-On film preserved Bocchi and produced 201 records / 152 places / 32 areas.
+- A live browser pass exposed and fixed old nested candidate-group intent snapshots. Compatibility projection now derives each group intent from the authoritative requirements collection, so persisted workspaces also recover every selected season after reload.
+- The dedicated Phase 18 browser gate passes on desktop and mobile and covers add, confirm, edit selected versions, and remove without restarting.

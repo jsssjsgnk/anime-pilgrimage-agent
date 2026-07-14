@@ -1,5 +1,6 @@
 """HTTP API entrypoint."""
 
+import re
 from asyncio import Lock
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -8,7 +9,7 @@ from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from anyio import to_thread
 from fastapi import FastAPI, HTTPException, Query
@@ -72,6 +73,7 @@ from pilgrimage_agent.domain.models import (
     PilgrimagePointQuery,
     RouteA,
     SubjectCandidate,
+    SubjectIntent,
     SubjectSearchQuery,
     SubjectSearchResult,
     TripRequest,
@@ -83,7 +85,12 @@ from pilgrimage_agent.domain.planning import (
     RouteBRequest,
     ValidationIssue,
 )
-from pilgrimage_agent.domain.workspace import DerivedKnowledgeRule, KnowledgeOperation, PlanPatch
+from pilgrimage_agent.domain.workspace import (
+    DerivedKnowledgeRule,
+    KnowledgeOperation,
+    PlanPatch,
+    SubjectIntentOperation,
+)
 from pilgrimage_agent.memory.schemas import StoredEvent, StoredPreference, StoredTrip
 from pilgrimage_agent.memory.store import ProjectStore, SqlProjectStore
 from pilgrimage_agent.memory.workspace_repository import SqlWorkspaceRepository
@@ -141,6 +148,81 @@ class CapabilityResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     capabilities: dict[str, bool]
+
+
+_WORK_COLLECTION_MESSAGE = re.compile(
+    r"^\s*(?:请)?\s*(添加|加入|增加|再加|移除|删除|去掉)\s*(?:作品)?\s*"
+    r"(?:[\u300a\u300c\u300e\u3010]"
+    r"([^\u300b\u300d\u300f\u3011]{1,100})"
+    r"[\u300b\u300d\u300f\u3011]|([^\u3002.!\uff01]{1,100}))"
+    r"\s*[\u3002.!\uff01]?\s*$"
+)
+
+
+def _collection_patch_from_message(
+    state: WorkspaceState, message: str, idempotency_key: str
+) -> PlanPatch | None:
+    match = _WORK_COLLECTION_MESSAGE.fullmatch(message)
+    if match is None:
+        return None
+    verb = match.group(1)
+    query = (match.group(2) or match.group(3) or "").strip()
+    if not query:
+        raise ValueError("请告诉我要添加或移除的作品名称")
+    adding = verb in {"添加", "加入", "增加", "再加"}
+    if adding:
+        if len(state.requirements.subject_intents) >= 12:
+            raise ValueError("一个工作区最多管理十二部作品")
+        if any(
+            item.query.casefold() == query.casefold()
+            for item in state.requirements.subject_intents
+        ):
+            raise ValueError("这部作品已经在当前巡礼中")
+        operation = SubjectIntentOperation(
+            action="add",
+            intent=SubjectIntent(query=query, priority=3, is_primary=False),
+        )
+        rationale = f"添加作品《{query}》并核对匹配条目"
+    else:
+        if len(state.requirements.subject_intents) == 1:
+            raise ValueError("当前巡礼至少需要保留一部作品")
+        names_by_intent: dict[UUID, set[str]] = {
+            item.intent_id: {item.query.casefold()}
+            for item in state.requirements.subject_intents
+        }
+        for confirmed in state.confirmed_subjects:
+            names_by_intent.setdefault(confirmed.intent_id, set()).update(
+                name.casefold()
+                for name in (
+                    confirmed.subject.name,
+                    confirmed.subject.name_cn,
+                    *confirmed.subject.aliases,
+                )
+                if name
+            )
+        normalized_query = query.casefold()
+        intent_id = next(
+            (
+                key
+                for key, names in names_by_intent.items()
+                if normalized_query in names
+            ),
+            None,
+        )
+        if intent_id is None:
+            raise ValueError("当前巡礼中没有找到这部作品")
+        operation = SubjectIntentOperation(action="remove", intent_id=intent_id)
+        rationale = f"从本次巡礼中移除《{query}》"
+    return PlanPatch(
+        patch_id=uuid4(),
+        trip_id=state.trip_id,
+        expected_base_version=state.state_version,
+        rationale=rationale,
+        requires_confirmation=True,
+        idempotency_key=idempotency_key,
+        created_at=datetime.now(UTC),
+        operations=(operation,),
+    )
 
 
 class RuntimeDiagnosticsResponse(BaseModel):
@@ -1005,7 +1087,29 @@ async def send_workspace_message(
         intent = ConversationIntent.STATUS
         action = ConversationAction()
         updated = state
-        if any(term in normalized for term in ("状态", "进展", "还缺", "status")):
+        try:
+            collection_patch = _collection_patch_from_message(
+                state,
+                request.message,
+                f"workspace-chat:{user_message.message_id}",
+            )
+        except ValueError as error:
+            collection_patch = None
+            intent = ConversationIntent.UNSUPPORTED_CHANGE
+            action = ConversationAction(kind="unsupported_change")
+            answer = str(error)
+        if collection_patch is not None:
+            updated, preview = agent.propose_patch(state, collection_patch)
+            await _save_workspace(store, updated, "workspace_patch_proposed")
+            intent = ConversationIntent.MODIFY_PLAN
+            action = ConversationAction(kind="confirmation_required")
+            answer = (
+                f"已理解这次修改: {preview.patch.rationale}。"
+                "确认后我会保留其他作品, 重新整理受影响的地点和行程。"
+            )
+        elif intent is ConversationIntent.UNSUPPORTED_CHANGE:
+            pass
+        elif any(term in normalized for term in ("状态", "进展", "还缺", "status")):
             answer = (
                 f"目前已确认 {len(state.confirmed_subjects)} 部作品, 整理出 "
                 f"{len(state.places)} 个巡礼地点和 {len(state.areas)} 个游览区域。"

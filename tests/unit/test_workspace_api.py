@@ -204,6 +204,14 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
                 "message": "把步行偏好设为 high",
             },
         )
+        conversational_add = await client.post(
+            f"/api/workspaces/{trip_id}/messages",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "message": "添加《莉可丽丝》",
+            },
+        )
 
     assert started.status_code == 200
     assert "evidence" not in started_body
@@ -253,6 +261,13 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
             "value": "high",
         }
     ]
+    assert conversational_add.status_code == 200
+    assert conversational_add.json()["preview"]["patch"]["operations"][0][
+        "action"
+    ] == "add"
+    assert conversational_add.json()["preview"]["patch"]["operations"][0][
+        "intent"
+    ]["query"] == "莉可丽丝"
     assert conversational_patch.json()["workspace"]["pending_patch_id"] is not None
     assistant_copy = conversational_patch.json()["assistant_message"]["content"]
     assert "PlanPatch" not in assistant_copy
@@ -269,6 +284,9 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
         "workspace_patch_applied",
         "workspace_knowledge_rule_proposed",
         "workspace_knowledge_rule_accepted",
+        "conversation_message",
+        "workspace_patch_proposed",
+        "conversation_message",
         "conversation_message",
         "workspace_patch_proposed",
         "conversation_message",

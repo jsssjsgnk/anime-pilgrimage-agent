@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import ClassVar
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -32,6 +32,7 @@ from pilgrimage_agent.domain.workspace import (
     AgentRole,
     PlaceOperation,
     PlanPatch,
+    SubjectIntentOperation,
     UpdateRequirementOperation,
 )
 
@@ -221,6 +222,11 @@ async def test_one_intent_can_confirm_multiple_seasons_and_merge_their_place() -
         "1424",
         "3774",
     )
+    assert confirmed.subject_groups[0].intent.catalog_subject_ids == ("1424", "3774")
+    assert workspace_view(confirmed).subject_groups[0].intent.catalog_subject_ids == (
+        "1424",
+        "3774",
+    )
     assert len(confirmed.evidence) == 2
     assert len(confirmed.places) == 1
     assert {item.subject_id for item in confirmed.places[0].subject_appearances} == {
@@ -264,6 +270,82 @@ async def _planned_workspace() -> tuple[WorkspaceAgent, WorkspaceState]:
             base_id=curated.base_candidates[0].base_id,
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_work_collection_add_confirm_and_remove_preserves_other_subjects() -> None:
+    agent, planned = await _planned_workspace()
+    original_subject_ids = {
+        item.subject.subject_id for item in planned.confirmed_subjects
+    }
+    original_evidence_ids = {item.evidence_id for item in planned.evidence}
+    added_intent = SubjectIntent(query="天气之子", priority=3)
+    add_patch = PlanPatch(
+        trip_id=planned.trip_id,
+        expected_base_version=planned.state_version,
+        rationale="添加天气之子",
+        requires_confirmation=True,
+        idempotency_key=f"test-add:{uuid4()}",
+        created_at=datetime.now(UTC),
+        operations=(SubjectIntentOperation(action="add", intent=added_intent),),
+    )
+    proposed, preview = agent.propose_patch(planned, add_patch)
+    awaiting = await agent.apply_patch(proposed, preview.patch.patch_id, confirm=True)
+
+    assert awaiting.status is WorkspaceStatus.AWAITING_SUBJECTS
+    assert {item.subject.subject_id for item in awaiting.confirmed_subjects} == (
+        original_subject_ids
+    )
+    assert awaiting.itineraries == planned.itineraries
+    added_group = next(
+        item for item in awaiting.subject_groups if item.intent.intent_id == added_intent.intent_id
+    )
+    refreshed = await agent.confirm_subjects(
+        awaiting,
+        ConfirmWorkspaceSubjectsRequest(
+            owner_user_id="user-1",
+            thread_id="thread-1",
+            expected_state_version=awaiting.state_version,
+            confirmations=(
+                SubjectConfirmation(
+                    intent_id=added_intent.intent_id,
+                    decision="accept",
+                    selected_subject_id=added_group.candidates[0].subject_id,
+                ),
+            ),
+        ),
+    )
+
+    assert original_subject_ids.issubset(
+        {item.subject.subject_id for item in refreshed.confirmed_subjects}
+    )
+    assert original_evidence_ids.issubset({item.evidence_id for item in refreshed.evidence})
+    assert refreshed.itineraries
+
+    remove_patch = PlanPatch(
+        trip_id=refreshed.trip_id,
+        expected_base_version=refreshed.state_version,
+        rationale="移除天气之子",
+        requires_confirmation=True,
+        idempotency_key=f"test-remove:{uuid4()}",
+        created_at=datetime.now(UTC),
+        operations=(
+            SubjectIntentOperation(action="remove", intent_id=added_intent.intent_id),
+        ),
+    )
+    proposed_remove, remove_preview = agent.propose_patch(refreshed, remove_patch)
+    removed = await agent.apply_patch(
+        proposed_remove, remove_preview.patch.patch_id, confirm=True
+    )
+
+    assert {item.subject.subject_id for item in removed.confirmed_subjects} == (
+        original_subject_ids
+    )
+    assert all(
+        item.intent_id != added_intent.intent_id
+        for item in removed.requirements.subject_intents
+    )
+    assert removed.itineraries
 
 
 @pytest.mark.asyncio
