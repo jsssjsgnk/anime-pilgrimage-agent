@@ -151,10 +151,27 @@ def test_fixture_service_composition_and_bounded_cache() -> None:
     assert cache.get(second, now=now + timedelta(minutes=2)) is None
 
 
+def test_live_bangumi_mode_is_independent_from_other_provider_fixtures() -> None:
+    services = ProviderServices(
+        Settings(
+            _env_file=None,
+            provider_mode="fixture",
+            BANGUMI_MODE="live",
+            BANGUMI_USER_AGENT="fixture-agent/1.0",
+        )
+    )
+
+    assert isinstance(services.bangumi, BangumiSubjectProvider)
+    assert isinstance(services.ors, FixtureOpenRouteServiceProvider)
+    assert isinstance(services.weather, FixtureOpenMeteoProvider)
+    assert isinstance(services.flights, FixtureSearchApiFlightProvider)
+
+
 def test_uppercase_live_mode_composes_real_provider_implementations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PROVIDER_MODE", "live")
+    monkeypatch.setenv("BANGUMI_MODE", "live")
     monkeypatch.setenv("BANGUMI_ACCESS_TOKEN", "contract-sentinel")
     monkeypatch.setenv("ORS_API_KEY", "contract-sentinel")
     monkeypatch.setenv("SEARCHAPI_API_KEY", "contract-sentinel")
@@ -163,6 +180,7 @@ def test_uppercase_live_mode_composes_real_provider_implementations(
     services = ProviderServices(settings)
 
     assert settings.provider_mode == "live"
+    assert settings.bangumi_mode == "live"
     assert isinstance(services.bangumi, BangumiSubjectProvider)
     assert isinstance(services.ors, OpenRouteServiceProvider)
     assert isinstance(services.weather, OpenMeteoProvider)

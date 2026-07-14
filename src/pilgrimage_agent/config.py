@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     provider_mode: Literal["fixture", "live"] = Field(
         default="fixture", alias="PROVIDER_MODE"
     )
+    bangumi_mode: Literal["fixture", "live"] = Field(
+        default="fixture", alias="BANGUMI_MODE"
+    )
     pilgrimage_point_mode: Literal["anitabi", "imported", "fixture"] = Field(
         default="fixture", alias="PILGRIMAGE_POINT_MODE"
     )
@@ -91,7 +94,7 @@ class Settings(BaseSettings):
 
         return {
             "llm": bool(self.llm_api_key and self.llm_base_url and self.llm_model),
-            "bangumi": bool(self.bangumi_access_token and self.bangumi_user_agent),
+            "bangumi": bool(self.bangumi_user_agent),
             "anitabi": True,
             "ors": bool(self.ors_api_key),
             "searchapi": bool(self.searchapi_api_key),
@@ -106,15 +109,10 @@ class Settings(BaseSettings):
                 name: ProviderRuntimeDiagnostic(
                     mode="fixture", configured=True, status="available"
                 )
-                for name in ("bangumi", "ors", "open_meteo", "searchapi")
+                for name in ("ors", "open_meteo", "searchapi")
             }
         else:
             diagnostics = {
-                "bangumi": ProviderRuntimeDiagnostic(
-                    mode="live",
-                    configured=bool(self.bangumi_user_agent),
-                    status="available" if self.bangumi_user_agent else "unavailable",
-                ),
                 "ors": ProviderRuntimeDiagnostic(
                     mode="live" if self.ors_api_key else "fallback",
                     configured=bool(self.ors_api_key),
@@ -134,6 +132,15 @@ class Settings(BaseSettings):
                     ),
                 ),
             }
+        diagnostics["bangumi"] = ProviderRuntimeDiagnostic(
+            mode=self.bangumi_mode,
+            configured=True if self.bangumi_mode == "fixture" else bool(self.bangumi_user_agent),
+            status=(
+                "available"
+                if self.bangumi_mode == "fixture" or self.bangumi_user_agent
+                else "unavailable"
+            ),
+        )
         if self.pilgrimage_point_mode == "fixture":
             points = ProviderRuntimeDiagnostic(
                 mode="fixture", configured=True, status="available"

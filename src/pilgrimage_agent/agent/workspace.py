@@ -102,11 +102,33 @@ class SubjectConfirmation(StrictModel):
     intent_id: UUID
     decision: Literal["accept", "reject"]
     selected_subject_id: str | None = Field(default=None, max_length=50)
+    selected_subject_ids: tuple[str, ...] = Field(default=(), max_length=5)
+
+    @model_validator(mode="before")
+    @classmethod
+    def adapt_single_selected_subject(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        adapted = dict(value)
+        single = adapted.get("selected_subject_id")
+        multiple = adapted.get("selected_subject_ids")
+        if single and not multiple:
+            adapted["selected_subject_ids"] = (single,)
+        elif multiple and not single and isinstance(multiple, (tuple, list)) and multiple:
+            adapted["selected_subject_id"] = multiple[0]
+        return adapted
 
     @model_validator(mode="after")
     def selected_id_matches_decision(self) -> SubjectConfirmation:
-        if (self.decision == "accept") != (self.selected_subject_id is not None):
-            raise ValueError("accepted subject confirmations require exactly one selected ID")
+        if len(self.selected_subject_ids) != len(set(self.selected_subject_ids)):
+            raise ValueError("selected subject IDs must be unique")
+        if (self.decision == "accept") != bool(self.selected_subject_ids):
+            raise ValueError("accepted subject confirmations require selected IDs")
+        if (
+            self.selected_subject_id is not None
+            and self.selected_subject_id not in self.selected_subject_ids
+        ):
+            raise ValueError("the compatibility selected ID must belong to the selected set")
         return self
 
 
@@ -490,83 +512,92 @@ class WorkspaceAgent:
                 continue
             group = group_by_intent[intent.intent_id]
             candidate_ids = {item.subject_id for item in group.candidates}
-            selected = confirmation.selected_subject_id
-            if selected not in candidate_ids:
-                raise ValueError("a selected subject must belong to its own candidate group")
-            subject_outcome = await invoke_tool(
-                self.tools,
-                "get_anime_subject",
-                {"subject_id": selected},
-                ConfirmedSubject,
-            )
-            if subject_outcome.value is None:
-                subject_warning = (
-                    subject_outcome.safe_warning or "Subject verification failed."
+            selected_ids = confirmation.selected_subject_ids
+            if not set(selected_ids).issubset(candidate_ids):
+                raise ValueError("selected subjects must belong to their own candidate group")
+            confirmed_ids: list[str] = []
+            for selected in selected_ids:
+                subject_outcome = await invoke_tool(
+                    self.tools,
+                    "get_anime_subject",
+                    {"subject_id": selected},
+                    ConfirmedSubject,
                 )
-                warnings.append(f"{intent.query}: {subject_warning}")
-                updated_intents.append(intent)
-                continue
-            subject = subject_outcome.value
-            updated_intents.append(
-                intent.model_copy(
-                    update={
-                        "confirmed_subject_id": subject.subject_id,
-                        "status": "confirmed",
-                    }
+                if subject_outcome.value is None:
+                    subject_warning = (
+                        subject_outcome.safe_warning or "Subject verification failed."
+                    )
+                    warnings.append(f"{intent.query} ({selected}): {subject_warning}")
+                    continue
+                subject = subject_outcome.value
+                confirmed_ids.append(subject.subject_id)
+                point_outcome = await invoke_tool(
+                    self.tools,
+                    "fetch_pilgrimage_points",
+                    PilgrimagePointQuery(
+                        subject_id=subject.subject_id, provider="anitabi"
+                    ).model_dump(mode="json"),
+                    PilgrimagePointResult,
                 )
-            )
-            point_outcome = await invoke_tool(
-                self.tools,
-                "fetch_pilgrimage_points",
-                PilgrimagePointQuery(
-                    subject_id=subject.subject_id, provider="anitabi"
-                ).model_dump(mode="json"),
-                PilgrimagePointResult,
-            )
-            point_warning: str | None
-            evidence_status: Literal["ok", "partial", "unavailable"]
-            if point_outcome.value is None:
-                point_warning = (
-                    point_outcome.safe_warning or "Scene evidence is unavailable."
-                )
-                evidence_status = "unavailable"
-                warnings.append(f"{intent.query}: {point_warning}")
-            else:
-                evidence.extend(
-                    evidence_from_point(item, trip_id=state.trip_id)
-                    for item in point_outcome.value.points
-                )
-                point_warning = "; ".join(point_outcome.value.warnings) or None
-                evidence_status = (
-                    "ok" if point_outcome.value.is_complete else "partial"
-                )
-                if point_warning:
+                point_warning: str | None
+                evidence_status: Literal["ok", "partial", "unavailable"]
+                if point_outcome.value is None:
+                    point_warning = (
+                        point_outcome.safe_warning or "Scene evidence is unavailable."
+                    )
+                    evidence_status = "unavailable"
                     warnings.append(f"{intent.query}: {point_warning}")
-            confirmed.append(
-                ConfirmedWorkspaceSubject(
-                    intent_id=intent.intent_id,
-                    subject=subject,
-                    evidence_status=evidence_status,
-                    warning=point_warning,
+                else:
+                    evidence.extend(
+                        evidence_from_point(item, trip_id=state.trip_id)
+                        for item in point_outcome.value.points
+                    )
+                    point_warning = "; ".join(point_outcome.value.warnings) or None
+                    evidence_status = (
+                        "ok" if point_outcome.value.is_complete else "partial"
+                    )
+                    if point_warning:
+                        warnings.append(f"{intent.query}: {point_warning}")
+                confirmed.append(
+                    ConfirmedWorkspaceSubject(
+                        intent_id=intent.intent_id,
+                        subject=subject,
+                        evidence_status=evidence_status,
+                        warning=point_warning,
+                    )
                 )
-            )
-            handoffs.append(
-                _handoff(
-                    run_id=run_id,
-                    sender=AgentRole.SUBJECT,
-                    receiver=AgentRole.EVIDENCE_COLLECTOR,
-                    task_type="collect_subject_evidence",
-                    goal=f"Collect normalized scene evidence for subject {subject.subject_id}.",
-                    input_refs=(_ref("subject", subject.subject_id),),
-                    output_schema="SceneEvidence[]",
-                    result_refs=tuple(
-                        _ref("scene_evidence", item.evidence_id)
-                        for item in evidence
-                        if item.subject_id == subject.subject_id
-                    ),
-                    warning=point_warning,
+                handoffs.append(
+                    _handoff(
+                        run_id=run_id,
+                        sender=AgentRole.SUBJECT,
+                        receiver=AgentRole.EVIDENCE_COLLECTOR,
+                        task_type="collect_subject_evidence",
+                        goal=(
+                            "Collect normalized scene evidence for subject "
+                            f"{subject.subject_id}."
+                        ),
+                        input_refs=(_ref("subject", subject.subject_id),),
+                        output_schema="SceneEvidence[]",
+                        result_refs=tuple(
+                            _ref("scene_evidence", item.evidence_id)
+                            for item in evidence
+                            if item.subject_id == subject.subject_id
+                        ),
+                        warning=point_warning,
+                    )
                 )
-            )
+            if confirmed_ids:
+                updated_intents.append(
+                    intent.model_copy(
+                        update={
+                            "confirmed_subject_id": confirmed_ids[0],
+                            "confirmed_subject_ids": tuple(confirmed_ids),
+                            "status": "confirmed",
+                        }
+                    )
+                )
+            else:
+                updated_intents.append(intent)
         requirements = state.requirements.model_copy(
             update={"subject_intents": tuple(updated_intents)}
         )
@@ -928,11 +959,14 @@ class WorkspaceAgent:
                             for item in confirmed
                             if item.intent_id != current_intent.intent_id
                         ]
-                        if current_intent.confirmed_subject_id:
+                        if current_intent.catalog_subject_ids:
+                            removed_subject_ids = set(
+                                current_intent.catalog_subject_ids
+                            )
                             evidence = [
                                 item
                                 for item in evidence
-                                if item.subject_id != current_intent.confirmed_subject_id
+                                if item.subject_id not in removed_subject_ids
                             ]
                             recurate = True
                     elif operation.action == "reprioritize":
@@ -941,7 +975,11 @@ class WorkspaceAgent:
                         )
                     elif operation.action == "reject":
                         intents[index] = current_intent.model_copy(
-                            update={"status": "rejected", "confirmed_subject_id": None}
+                            update={
+                                "status": "rejected",
+                                "confirmed_subject_id": None,
+                                "confirmed_subject_ids": (),
+                            }
                         )
                     else:
                         raise ValueError(

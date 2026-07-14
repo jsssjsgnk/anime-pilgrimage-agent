@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from typing import Any
 
@@ -91,6 +92,11 @@ async def test_bangumi_contract_supports_empty_and_success(items: list[dict[str,
         assert request.method == "POST"
         assert request.headers.get("user-agent") == "fixture-app/1.0"
         assert request.headers.get("authorization") == "Bearer fixture-credential"
+        assert json.loads(request.content) == {
+            "keyword": "Bocchi",
+            "sort": "match",
+            "filter": {"type": [2]},
+        }
         return json_response(request, {"data": items})
 
     http, client = transport_client("bangumi", handler)
@@ -105,6 +111,32 @@ async def test_bangumi_contract_supports_empty_and_success(items: list[dict[str,
         await client.aclose()
     assert len(result.candidates) == len(items)
     assert all(candidate.provenance.source_url for candidate in result.candidates)
+
+
+async def test_bangumi_public_search_does_not_require_a_token() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "authorization" not in request.headers
+        assert json.loads(request.content)["filter"] == {"type": [2]}
+        return json_response(
+            request,
+            {
+                "data": [
+                    {
+                        "id": 1424,
+                        "name": "けいおん！",  # noqa: RUF001 - official title
+                        "name_cn": "轻音少女",
+                    }
+                ]
+            },
+        )
+
+    http, client = transport_client("bangumi", handler)
+    provider = BangumiSubjectProvider(token=None, user_agent="fixture-app/1.0", http=http)
+    try:
+        result = await provider.fetch(SubjectSearchQuery(query="轻音少女", limit=5))
+    finally:
+        await client.aclose()
+    assert [candidate.subject_id for candidate in result.candidates] == ["1424"]
 
 
 async def test_anitabi_contract_fetches_complete_points_and_reuses_cache() -> None:

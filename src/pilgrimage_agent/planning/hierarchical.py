@@ -94,20 +94,19 @@ def _walking_limit(request: TripRequest) -> float:
 
 def _priority_map(intents: tuple[SubjectIntent, ...]) -> dict[str, int]:
     return {
-        item.confirmed_subject_id: item.priority
+        subject_id: item.priority
         for item in intents
-        if item.status == "confirmed" and item.confirmed_subject_id is not None
+        if item.status == "confirmed"
+        for subject_id in item.catalog_subject_ids
     }
 
 
-def _primary_subject(intents: tuple[SubjectIntent, ...]) -> str | None:
-    return next(
-        (
-            item.confirmed_subject_id
-            for item in intents
-            if item.is_primary and item.status == "confirmed"
-        ),
-        None,
+def _primary_subjects(intents: tuple[SubjectIntent, ...]) -> frozenset[str]:
+    return frozenset(
+        subject_id
+        for item in intents
+        if item.is_primary and item.status == "confirmed"
+        for subject_id in item.catalog_subject_ids
     )
 
 
@@ -119,7 +118,7 @@ def _area_components(
 ) -> dict[str, float]:
     area_places = tuple(places[item] for item in area.place_ids)
     priorities = _priority_map(intents)
-    primary = _primary_subject(intents)
+    primary = _primary_subjects(intents)
     appearance_subjects = {
         appearance.subject_id
         for place in area_places
@@ -131,7 +130,7 @@ def _area_components(
             1
             for place in area_places
             if primary
-            and any(item.subject_id == primary for item in place.subject_appearances)
+            and any(item.subject_id in primary for item in place.subject_appearances)
         )
     )
     shared_place_value = float(
@@ -557,20 +556,21 @@ def _plan_strategy(
             appearances_by_subject[appearance.subject_id].add(place.place_id)
     coverage = tuple(
         SubjectCoverage(
-            subject_id=intent.confirmed_subject_id,
+            subject_id=subject_id,
             priority=intent.priority,
             scheduled_place_ids=tuple(
-                sorted(appearances_by_subject[intent.confirmed_subject_id], key=str)
+                sorted(appearances_by_subject[subject_id], key=str)
             ),
             minimum_place_count=intent.minimum_place_count,
             minimum_satisfied=(
                 intent.minimum_place_count is None
-                or len(appearances_by_subject[intent.confirmed_subject_id])
+                or len(appearances_by_subject[subject_id])
                 >= intent.minimum_place_count
             ),
         )
         for intent in intents
-        if intent.status == "confirmed" and intent.confirmed_subject_id is not None
+        if intent.status == "confirmed"
+        for subject_id in intent.catalog_subject_ids
     )
     issues: list[ValidationIssue] = []
     for place_id in request.must_visit_place_ids - scheduled_ids:

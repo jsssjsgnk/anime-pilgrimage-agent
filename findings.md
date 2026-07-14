@@ -1,5 +1,19 @@
 # Findings & Decisions
 
+## 2026-07-15 — Arbitrary-title discovery failure
+
+- The screenshot proves natural-language extraction is no longer the failure: the workspace correctly extracted “轻音少女” as one subject intent, then displayed zero catalog candidates.
+- The current no-candidate confirmation state is a dead end. The primary fix is broader real subject discovery; a user-facing retry/edit path is still required because external catalogs can be unavailable or ambiguous.
+- Candidate discovery and Anitabi evidence retrieval are separate boundaries. A valid Bangumi subject match must not be presented as having pilgrimage points until the read-only evidence Provider actually returns them.
+- Compose currently defaults `PROVIDER_MODE=fixture` for both the API and MCP service. `ProviderServices` consequently selects `FixtureBangumiSubjectProvider`, whose implementation recognizes only 《孤独摇滚！》 (`328609`) and 《莉可丽丝》 (`364450`). This exactly explains why changing to any ordinary third work fails before Anitabi is queried.
+- `PILGRIMAGE_POINT_MODE` is already independently set to `anitabi` in Compose. Subject catalog mode needs the same separation so deterministic routing/weather/flight fixtures do not force a two-title catalog.
+- The user's configuration reading is correct: only `PILGRIMAGE_POINT_MODE` has the independent alias/mode needed to escape the broad fixture switch. There is no corresponding Bangumi catalog mode today.
+- A bounded, unauthenticated read-only call to Bangumi's official `/v0/search/subjects` endpoint with UTF-8 `轻音少女` and anime type filter returned three relevant candidates: subject `1424` (TV season 1), `3774` (season 2), and `12426` (film). The provider currently rejects this working public path before making the request whenever no token is configured.
+- The three results are not merely ambiguity: users may intentionally want all seasons and the film. The current radio-button confirmation and singular `selected_subject_id` contract cannot express that request. Confirmation must accept a bounded non-empty set per intent, fetch evidence for each confirmed catalog subject, and let existing scene-to-place resolution merge physical duplicates.
+- Live Anitabi checks confirm all three K-On catalog entries have usable evidence: `1424` advertises 214 points / exposes 50 detail records, `3774` advertises 201 / exposes 77, and `12426` advertises 287 / exposes 51. Each remains explicitly partial because the documented detail arrays are smaller than the advertised totals.
+- End-to-end local browser verification now resolves “轻音少女” to exactly the three expected Bangumi candidates, allows all three checkboxes to be selected, and confirms them in one request. Live Anitabi returns 178 scene-detail records, which resolve to 138 canonical places across 30 areas.
+- The initial focused K-On area displays 50 numbered markers. Marker selection highlights one point and opens a matching scene card with an image; the UI also exposes three separate work filters and labels shared canonical locations with the existing dual-color marker treatment.
+
 ## 2026-07-15 — Initial workspace center-panel defect
 
 - The user screenshot shows the pre-planning center canvas occupying the full 720px workspace shell while containing only a centered four-step label. The resulting whitespace has no informational or interaction purpose.

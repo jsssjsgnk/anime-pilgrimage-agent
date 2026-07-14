@@ -14,7 +14,7 @@ from pilgrimage_agent.domain.models import (
     SubjectSearchQuery,
     SubjectSearchResult,
 )
-from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind, missing_credential
+from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.cache import MemoryProviderCache, request_fingerprint
 from pilgrimage_agent.providers.common import provenance
 from pilgrimage_agent.providers.http import SafeHttpClient
@@ -57,13 +57,13 @@ class BangumiSubjectProvider:
         self.cache: MemoryProviderCache[SubjectSearchResult] = MemoryProviderCache()
 
     def _headers(self) -> dict[str, str]:
-        if not self.token:
-            raise missing_credential(self.provider, "BANGUMI_ACCESS_TOKEN")
-        return {
-            "Authorization": f"Bearer {self.token}",
+        headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json",
         }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
 
     async def fetch(self, query: SubjectSearchQuery) -> SubjectSearchResult:
         fingerprint = request_fingerprint(self.provider, query)
@@ -75,7 +75,11 @@ class BangumiSubjectProvider:
             f"{BANGUMI_BASE_URL}/v0/search/subjects",
             headers=self._headers(),
             params={"limit": query.limit, "offset": 0},
-            json_body={"keyword": query.query, "sort": "match"},
+            json_body={
+                "keyword": query.query,
+                "sort": "match",
+                "filter": {"type": [2]},
+            },
         )
         try:
             payload = _DICT.validate_python(raw)

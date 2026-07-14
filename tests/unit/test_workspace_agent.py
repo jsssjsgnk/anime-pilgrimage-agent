@@ -118,6 +118,53 @@ class MultiSubjectTools:
         return point_result.model_dump(mode="json")
 
 
+class MultiSeasonTools:
+    async def call(
+        self, name: str, arguments: Mapping[str, object]
+    ) -> dict[str, object]:
+        if name == "search_anime_subjects":
+            search_result = SubjectSearchResult(
+                candidates=tuple(
+                    SubjectCandidate(
+                        subject_id=subject_id,
+                        name=title,
+                        name_cn=title,
+                        provenance=_provenance("bangumi"),
+                    )
+                    for subject_id, title in (
+                        ("1424", "轻音少女"),
+                        ("3774", "轻音少女 第二季"),
+                    )
+                ),
+                provenance=_provenance("bangumi"),
+            )
+            return search_result.model_dump(mode="json")
+        subject_id = str(arguments["subject_id"])
+        if name == "get_anime_subject":
+            confirmed_result = ConfirmedSubject(
+                subject_id=subject_id,
+                name=subject_id,
+                provenance=_provenance("bangumi"),
+            )
+            return confirmed_result.model_dump(mode="json")
+        if name != "fetch_pilgrimage_points":
+            raise ValueError("unexpected test tool")
+        point = PilgrimagePoint(
+            id=UUID(int=1 if subject_id == "1424" else 2),
+            subject_id=subject_id,
+            name="学校正门",
+            latitude=35.00001,
+            longitude=135.00001,
+            confidence="community",
+            provenance=_provenance("anitabi"),
+        )
+        return PilgrimagePointResult(
+            points=(point,),
+            is_complete=True,
+            provenance=_provenance("anitabi"),
+        ).model_dump(mode="json")
+
+
 def _requirements() -> TripRequest:
     start = date.today() + timedelta(days=30)
     return TripRequest(
@@ -131,6 +178,55 @@ def _requirements() -> TripRequest:
         ),
         walking_preference="medium",
     )
+
+
+@pytest.mark.asyncio
+async def test_one_intent_can_confirm_multiple_seasons_and_merge_their_place() -> None:
+    agent = WorkspaceAgent(MultiSeasonTools())
+    start = date.today() + timedelta(days=30)
+    initial = await agent.start(
+        WorkspaceStartRequest(
+            owner_user_id="user-1",
+            thread_id="thread-1",
+            request_summary="一天巡礼《轻音少女》的多个季度。",
+            requirements=TripRequest(
+                destination="京都",
+                start_date=start,
+                end_date=start,
+                subject_intents=(
+                    SubjectIntent(query="轻音少女", is_primary=True, priority=5),
+                ),
+            ),
+        )
+    )
+    group = initial.subject_groups[0]
+    confirmed = await agent.confirm_subjects(
+        initial,
+        ConfirmWorkspaceSubjectsRequest(
+            owner_user_id="user-1",
+            thread_id="thread-1",
+            expected_state_version=initial.state_version,
+            confirmations=(
+                SubjectConfirmation(
+                    intent_id=group.intent.intent_id,
+                    decision="accept",
+                    selected_subject_ids=("1424", "3774"),
+                ),
+            ),
+        ),
+    )
+
+    assert len(confirmed.confirmed_subjects) == 2
+    assert confirmed.requirements.subject_intents[0].catalog_subject_ids == (
+        "1424",
+        "3774",
+    )
+    assert len(confirmed.evidence) == 2
+    assert len(confirmed.places) == 1
+    assert {item.subject_id for item in confirmed.places[0].subject_appearances} == {
+        "1424",
+        "3774",
+    }
 
 
 async def _planned_workspace() -> tuple[WorkspaceAgent, WorkspaceState]:

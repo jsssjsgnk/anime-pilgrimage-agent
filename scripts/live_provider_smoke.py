@@ -22,7 +22,11 @@ async def main_async() -> int:
     settings = get_settings()
     services = ProviderServices(
         settings.model_copy(
-            update={"provider_mode": "live", "pilgrimage_point_mode": "anitabi"}
+            update={
+                "provider_mode": "live",
+                "bangumi_mode": "live",
+                "pilgrimage_point_mode": "anitabi",
+            }
         )
     )
     today = date.today()

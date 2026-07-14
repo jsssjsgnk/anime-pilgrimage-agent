@@ -19,7 +19,7 @@ def test_capabilities_expose_presence_only() -> None:
     )
     assert settings.capability_status() == {
         "llm": True,
-        "bangumi": False,
+        "bangumi": True,
         "anitabi": True,
         "ors": False,
         "searchapi": False,
@@ -49,10 +49,12 @@ def test_capability_endpoint_never_returns_values() -> None:
 
 def test_uppercase_provider_mode_selects_live_runtime(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("PROVIDER_MODE", "live")
+    monkeypatch.setenv("BANGUMI_MODE", "live")
     monkeypatch.setenv("PILGRIMAGE_POINT_MODE", "anitabi")
     settings = Settings(_env_file=None)
 
     assert settings.provider_mode == "live"
+    assert settings.bangumi_mode == "live"
     diagnostics = settings.provider_diagnostics()
     assert diagnostics["bangumi"].mode == "live"
     assert diagnostics["open_meteo"].mode == "live"

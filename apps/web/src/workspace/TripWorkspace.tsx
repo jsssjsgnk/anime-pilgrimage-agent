@@ -221,35 +221,61 @@ function ProgressCounts({ workspace }: { workspace: WorkspaceView }) {
   );
 }
 
-function SubjectConfirmation({ workspace, busy, onConfirm }: {
+function SubjectConfirmation({ workspace, busy, onConfirm, onRestart }: {
   workspace: WorkspaceView;
   busy: boolean;
-  onConfirm: (choices: Record<string, string>) => Promise<void>;
+  onConfirm: (choices: Record<string, string[]>) => Promise<void>;
+  onRestart: () => void;
 }) {
-  const [choices, setChoices] = useState<Record<string, string>>(() => Object.fromEntries(
+  const [choices, setChoices] = useState<Record<string, string[]>>(() => Object.fromEntries(
     workspace.subject_groups.flatMap((group) => group.candidates[0]
-      ? [[group.intent.intent_id, group.candidates[0].subject_id]] : []),
+      ? [[group.intent.intent_id, [group.candidates[0].subject_id]]] : []),
   ));
+  const hasMissingCandidates = workspace.subject_groups.some((group) => group.candidates.length === 0);
+  const canConfirm = workspace.subject_groups.every(
+    (group) => group.candidates.length > 0 && (choices[group.intent.intent_id]?.length ?? 0) > 0,
+  );
+  function toggleCandidate(intentId: string, subjectId: string) {
+    setChoices((current) => {
+      const selected = current[intentId] ?? [];
+      const next = selected.includes(subjectId)
+        ? selected.filter((item) => item !== subjectId)
+        : [...selected, subjectId];
+      return { ...current, [intentId]: next };
+    });
+  }
   return (
     <section className="mix-confirm-card" aria-labelledby="mix-confirm-title">
       <div className="mix-section-heading">
         <div><span className="mix-kicker">需要你确认</span><h3 id="mix-confirm-title">作品匹配结果</h3></div>
         <span>{workspace.subject_groups.length} 部作品</span>
       </div>
-      <p>有些作品名称很相近，请确认下面是否是你想去的作品。</p>
+      <p>请勾选你想巡礼的条目；不同季度和剧场版可以同时选择。</p>
       <div className="mix-subject-groups">
         {workspace.subject_groups.map((group) => (
           <fieldset key={group.intent.intent_id}>
             <legend>{group.intent.query} · 优先级 {group.intent.priority}</legend>
             {group.candidates.length === 0 && <p className="mix-warning">暂时没有找到匹配作品，请返回修改名称后重试。</p>}
+            {group.candidates.length > 1 && (
+              <button
+                className="mix-subject-select-all"
+                type="button"
+                onClick={() => setChoices((current) => ({
+                  ...current,
+                  [group.intent.intent_id]: group.candidates.map((candidate) => candidate.subject_id),
+                }))}
+              >
+                选择全部季度与版本
+              </button>
+            )}
             {group.candidates.map((candidate) => (
-              <label key={candidate.subject_id} className={choices[group.intent.intent_id] === candidate.subject_id ? "is-selected" : ""}>
+              <label key={candidate.subject_id} className={choices[group.intent.intent_id]?.includes(candidate.subject_id) ? "is-selected" : ""}>
                 <input
-                  type="radio"
+                  type="checkbox"
                   name={group.intent.intent_id}
                   value={candidate.subject_id}
-                  checked={choices[group.intent.intent_id] === candidate.subject_id}
-                  onChange={() => setChoices((current) => ({ ...current, [group.intent.intent_id]: candidate.subject_id }))}
+                  checked={choices[group.intent.intent_id]?.includes(candidate.subject_id) ?? false}
+                  onChange={() => toggleCandidate(group.intent.intent_id, candidate.subject_id)}
                 />
                 <span><strong>{candidate.name_cn || candidate.name}</strong><small>{candidate.name}</small></span>
                 <Check aria-hidden="true" />
@@ -258,15 +284,18 @@ function SubjectConfirmation({ workspace, busy, onConfirm }: {
           </fieldset>
         ))}
       </div>
-      <button
-        className="mix-primary-button"
-        type="button"
-        disabled={busy || Object.keys(choices).length !== workspace.subject_groups.length}
-        onClick={() => void onConfirm(choices)}
-      >
-        {busy ? <RefreshCw className="is-spinning" aria-hidden="true" /> : <Check aria-hidden="true" />}
-        确认并整理地点
-      </button>
+      <div className="mix-confirm-actions">
+        <button
+          className="mix-primary-button"
+          type="button"
+          disabled={busy || !canConfirm}
+          onClick={() => void onConfirm(choices)}
+        >
+          {busy ? <RefreshCw className="is-spinning" aria-hidden="true" /> : <Check aria-hidden="true" />}
+          确认并整理地点
+        </button>
+        {hasMissingCandidates && <button className="mix-text-button" type="button" onClick={onRestart}>返回修改作品名称</button>}
+      </div>
     </section>
   );
 }
@@ -370,7 +399,7 @@ export function TripWorkspace() {
     finally { setBusy(false); }
   }
 
-  async function confirmSubjects(choices: Record<string, string>) {
+  async function confirmSubjects(choices: Record<string, string[]>) {
     if (!workspace) return;
     setBusy(true); setError(null);
     try {
@@ -383,7 +412,7 @@ export function TripWorkspace() {
           confirmations: workspace.subject_groups.map((group) => ({
             intent_id: group.intent.intent_id,
             decision: "accept",
-            selected_subject_id: choices[group.intent.intent_id],
+            selected_subject_ids: choices[group.intent.intent_id],
           })),
         }),
       });
@@ -594,7 +623,7 @@ export function TripWorkspace() {
             <>
               <ProgressCounts workspace={workspace} />
           {workspace.status === "awaiting_subject_confirmation" ? (
-            <SubjectConfirmation workspace={workspace} busy={busy} onConfirm={confirmSubjects} />
+            <SubjectConfirmation workspace={workspace} busy={busy} onConfirm={confirmSubjects} onRestart={reset} />
           ) : (
             <>
               <div className="mix-canvas-toolbar">
@@ -650,7 +679,7 @@ export function TripWorkspace() {
           <div className="mix-pane-title"><GitCompareArrows aria-hidden="true" /><div><strong>行程信息</strong><span>日期、版本与资料说明</span></div></div>
           {!workspace ? <p className="mix-muted">开始规划后，这里会显示日期、住宿、行程版本和资料说明。</p> : (
             <>
-              <section className="mix-context-block"><h3><CalendarDays aria-hidden="true" />行程范围</h3><dl><div><dt>日期</dt><dd>{workspace.requirements.start_date ?? "未定"} — {workspace.requirements.end_date ?? "未定"}</dd></div><div><dt>作品</dt><dd>{workspace.confirmed_subjects.length} / {workspace.subject_groups.length} 已确认</dd></div><div><dt>住宿基点</dt><dd>{workspace.base_candidates.find((base) => base.base_id === workspace.selected_base_id)?.name ?? "待选择"}</dd></div></dl></section>
+              <section className="mix-context-block"><h3><CalendarDays aria-hidden="true" />行程范围</h3><dl><div><dt>日期</dt><dd>{workspace.requirements.start_date ?? "未定"} — {workspace.requirements.end_date ?? "未定"}</dd></div><div><dt>作品</dt><dd>{workspace.confirmed_subjects.length} 个条目已确认</dd></div><div><dt>住宿基点</dt><dd>{workspace.base_candidates.find((base) => base.base_id === workspace.selected_base_id)?.name ?? "待选择"}</dd></div></dl></section>
               <section className="mix-context-block"><h3><Clock3 aria-hidden="true" />修改记录</h3><ul className="mix-event-list">{workspace.diffs.slice().reverse().map((diff) => <li key={`${diff.from_version}-${diff.to_version}`}><span>行程版本 {diff.to_version}</span><small>{diff.changed_day_numbers.length ? `调整第 ${diff.changed_day_numbers.join("、")} 天` : "更新了行程要求"}</small></li>)}</ul>{workspace.diffs.length === 0 && <p className="mix-muted">还没有修改记录。</p>}</section>
               <section className="mix-context-block"><h3><GitCompareArrows aria-hidden="true" />行程版本</h3><ul className="mix-version-list">{workspace.itineraries.slice(0, 6).map((item) => <li key={item.itinerary_id}><strong>v{item.version}</strong><span>{strategyLabel(item.strategy)}</span><small>{item.days.reduce((total, day) => total + day.visits.length, 0)} 个地点{item.validation_issues.length ? ` · ${item.validation_issues.length} 项需调整` : " · 安排可行"}</small></li>)}</ul></section>
               <section className="mix-context-block"><button className="mix-disclosure" onClick={() => setShowEvidence((value) => !value)} aria-expanded={showEvidence}><Layers3 aria-hidden="true" />资料说明 <span>{workspace.counts.raw_scene_records}</span></button>{showEvidence && <div className="mix-evidence-summary"><p>已整理 {workspace.counts.raw_scene_records} 条场景资料，形成 {workspace.counts.canonical_places} 个巡礼地点。</p>{workspace.counts.quarantined_records > 0 && <p>{workspace.counts.quarantined_records} 条资料因位置不明确而未加入地图。</p>}<p>出发前请再次确认开放时间和现场规则。</p></div>}</section>

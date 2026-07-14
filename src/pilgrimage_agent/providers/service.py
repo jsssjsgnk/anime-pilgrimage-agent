@@ -65,18 +65,30 @@ class ProviderServices:
                 ImportedPilgrimagePointProvider(import_path),
             )
 
-        if settings.provider_mode == "fixture":
+        if settings.bangumi_mode == "fixture":
             self.bangumi = FixtureBangumiSubjectProvider()
+        else:
+            bangumi_http = SafeHttpClient(
+                provider="bangumi",
+                timeout_seconds=settings.provider_timeout_seconds,
+                max_attempts=settings.provider_max_attempts,
+            )
+            self.bangumi = BangumiSubjectProvider(
+                token=(
+                    settings.bangumi_access_token.get_secret_value()
+                    if settings.bangumi_access_token
+                    else None
+                ),
+                user_agent=settings.bangumi_user_agent,
+                http=bangumi_http,
+            )
+
+        if settings.provider_mode == "fixture":
             self.ors = FixtureOpenRouteServiceProvider()
             self.weather = FixtureOpenMeteoProvider()
             self.flights = FixtureSearchApiFlightProvider()
             return
 
-        bangumi_http = SafeHttpClient(
-            provider="bangumi",
-            timeout_seconds=settings.provider_timeout_seconds,
-            max_attempts=settings.provider_max_attempts,
-        )
         ors_http = SafeHttpClient(
             provider="openrouteservice",
             timeout_seconds=settings.provider_timeout_seconds,
@@ -91,15 +103,6 @@ class ProviderServices:
             provider="searchapi",
             timeout_seconds=settings.provider_timeout_seconds,
             max_attempts=settings.provider_max_attempts,
-        )
-        self.bangumi = BangumiSubjectProvider(
-            token=(
-                settings.bangumi_access_token.get_secret_value()
-                if settings.bangumi_access_token
-                else None
-            ),
-            user_agent=settings.bangumi_user_agent,
-            http=bangumi_http,
         )
         self.ors = OpenRouteServiceProvider(
             api_key=settings.ors_api_key.get_secret_value() if settings.ors_api_key else None,

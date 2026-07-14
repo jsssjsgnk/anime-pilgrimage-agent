@@ -2,7 +2,7 @@
 
 ## 凭证清单
 
-项目只要求四类用户凭证：
+项目支持以下四类用户凭证；公开作品检索不强制要求 Bangumi Token：
 
 ```dotenv
 LLM_API_KEY=
@@ -11,7 +11,7 @@ ORS_API_KEY=
 SEARCHAPI_API_KEY=
 ```
 
-LLM 另需用户服务商的 `LLM_BASE_URL` 和精确 `LLM_MODEL`；它们不是密钥。`BANGUMI_USER_AGENT` 是公开应用标识，不是密钥。
+LLM 另需用户服务商的 `LLM_BASE_URL` 和精确 `LLM_MODEL`；它们不是密钥。`BANGUMI_USER_AGENT` 是公开应用标识，不是密钥。开发 Compose 默认使用独立的 `BANGUMI_MODE=live` 进行只读公开目录检索，同时保留 `fixture` 模式供离线测试使用。
 
 Open-Meteo、Google Maps URLs 和基础地图不需要额外 Key。Duffel/Amadeus 不得成为必需配置。
 
@@ -49,8 +49,10 @@ Agent 通过 `langchain-mcp-adapters` 连接，只加载白名单。工具输出
 
 ## Bangumi
 
-- 使用 Bearer Token 和固定 User-Agent；
+- 使用固定 User-Agent；Bearer Token 若已配置则附加，但公开只读搜索与条目读取不依赖它；
+- 只搜索动画类型，避免游戏、书籍等同名条目混入候选；
 - 搜索候选后必须由用户确认 Subject ID；
+- 同一自然作品范围可同时确认最多五个季度或剧场版条目；
 - 公共读取和用户数据分开；MVP 不实现写操作；
 - 缓存基本条目，但保留 fetched_at/provider/source URL。
 

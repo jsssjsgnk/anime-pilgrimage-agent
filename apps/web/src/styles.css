@@ -1525,6 +1525,9 @@ textarea:focus {
 .mix-subject-groups label small { color: var(--mix-muted); }
 .mix-subject-groups label svg { width: 17px; color: var(--mix-primary); opacity: 0; }
 .mix-subject-groups label.is-selected svg { opacity: 1; }
+.mix-subject-select-all { justify-self: start; min-height: 36px; padding: 6px 9px; border: 1px solid var(--mix-line); border-radius: 8px; background: white; color: var(--mix-primary); font-size: 12px; font-weight: 750; cursor: pointer; }
+.mix-confirm-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.mix-confirm-actions .mix-text-button { margin: 0; }
 .mix-warning { color: #8a570e; }
 
 .mix-itinerary { margin-top: 18px; padding: 16px; border: 1px solid var(--mix-line); border-radius: 16px; background: rgba(255, 253, 248, .96); }

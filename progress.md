@@ -1,5 +1,18 @@
 # Progress Log
 
+### 2026-07-15 - Phase 17 arbitrary-title discovery
+
+- User reproduced a real dead end by entering “我想用一天巡礼轻音少女”: title extraction succeeded, but subject resolution returned zero candidates and the workspace offered neither a usable confirmation nor an inline retry.
+- Started tracing the configured Bangumi candidate Provider, fixture/live composition, alias normalization, and the confirmation UI. “轻音少女” is the required regression case; the fix must still preserve explicit confirmation and honest no-evidence behavior.
+- Root cause confirmed: the full development stack uses the two-record fixture Bangumi provider because catalog selection is coupled to the broad `PROVIDER_MODE=fixture` switch. Anitabi is independently live, but never reached when fixture title matching returns zero candidates.
+- Confirmed the user's alias observation and verified the official public Bangumi search path with the exact failing title. Planned implementation: independent `BANGUMI_MODE`, optional Authorization header, anime-only search filtering, plus fixture-preserving tests.
+- Scope expanded per user clarification: one title intent may select several catalog entries (for example both TV seasons and the film). Auditing the domain/API confirmation contract now; the implementation will keep the 1–3 natural-intent limit while allowing bounded multi-entry confirmation inside each intent.
+- Implemented independent `BANGUMI_MODE`, public token-optional anime search, multi-entry confirmation schemas, multi-season priority/coverage planning, checkbox confirmation UI, select-all versions, and no-result return-to-edit recovery. Focused Python/Web tests, lint, and strict typing are being run incrementally.
+- Verified that Anitabi has live point/detail data for all three K-On entries, so the exact user scenario can continue through real scene evidence rather than ending at catalog confirmation.
+- Rebuilt the API, MCP, and Web images and confirmed all four Compose services healthy. The real browser path returned the three K-On versions, selected all three, merged 178 scene records into 138 places/30 areas, and displayed 50 markers in the default focused area with working scene detail.
+- Focused acceptance is green: 135 Python tests at 80.45% coverage, 8 Web unit tests, lint, strict Python/Web typing, and all 12 desktop/mobile E2E scenarios including the new arbitrary-title multi-season flow.
+- Final `make verify-all` passed in 461.9 seconds with the same 135 Python / 8 Web / 12 E2E results plus clean Compose rebuild and recovery, real E5/pgvector checks, all six phase reports, secret/privacy scans, and remediation A–J.
+
 ### 2026-07-15 - Phase 16 initial canvas correction
 
 - Started from the user-provided desktop screenshot and identified the oversized, mostly empty center panel plus bottom-edge content leakage.

@@ -45,16 +45,42 @@ class SubjectIntent(StrictModel):
     intent_id: UUID = Field(default_factory=uuid4)
     query: str = Field(min_length=1, max_length=200)
     confirmed_subject_id: str | None = Field(default=None, min_length=1, max_length=50)
+    confirmed_subject_ids: tuple[str, ...] = Field(default=(), max_length=5)
     priority: int = Field(default=3, ge=1, le=5)
     minimum_place_count: int | None = Field(default=None, ge=0, le=100)
     is_primary: bool = False
     status: Literal["proposed", "confirmed", "rejected"] = "proposed"
 
+    @model_validator(mode="before")
+    @classmethod
+    def adapt_single_confirmed_subject(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        adapted = dict(value)
+        single = adapted.get("confirmed_subject_id")
+        multiple = adapted.get("confirmed_subject_ids")
+        if single and not multiple:
+            adapted["confirmed_subject_ids"] = (single,)
+        elif multiple and not single and isinstance(multiple, (tuple, list)) and multiple:
+            adapted["confirmed_subject_id"] = multiple[0]
+        return adapted
+
     @model_validator(mode="after")
     def confirmation_is_consistent(self) -> "SubjectIntent":
-        if self.status == "confirmed" and self.confirmed_subject_id is None:
-            raise ValueError("confirmed subject intents require a catalog subject ID")
+        if len(self.confirmed_subject_ids) != len(set(self.confirmed_subject_ids)):
+            raise ValueError("confirmed catalog subject IDs must be unique")
+        if self.status == "confirmed" and not self.confirmed_subject_ids:
+            raise ValueError("confirmed subject intents require catalog subject IDs")
+        if (
+            self.confirmed_subject_id is not None
+            and self.confirmed_subject_id not in self.confirmed_subject_ids
+        ):
+            raise ValueError("the compatibility subject ID must belong to the confirmed set")
         return self
+
+    @property
+    def catalog_subject_ids(self) -> tuple[str, ...]:
+        return self.confirmed_subject_ids
 
 
 class TripRequest(StrictModel):
@@ -109,9 +135,9 @@ class TripRequest(StrictModel):
         if self.subject_intents and len(primary) != 1:
             raise ValueError("one and only one subject intent must be primary")
         confirmed_ids = [
-            item.confirmed_subject_id
+            subject_id
             for item in self.subject_intents
-            if item.confirmed_subject_id is not None
+            for subject_id in item.catalog_subject_ids
         ]
         if len(confirmed_ids) != len(set(confirmed_ids)):
             raise ValueError("one catalog subject cannot satisfy multiple intents")

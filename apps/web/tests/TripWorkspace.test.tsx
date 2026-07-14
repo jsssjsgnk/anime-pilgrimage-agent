@@ -71,6 +71,72 @@ describe("TripWorkspace", () => {
     expect(payload.requirements.subject_intents).toHaveLength(2);
   });
 
+  it("allows several seasons for one title and submits them together", async () => {
+    const seasons = [
+      { subject_id: "1424", name: "K-On!", name_cn: "轻音少女", aliases: [] },
+      { subject_id: "3774", name: "K-On!!", name_cn: "轻音少女 第二季", aliases: [] },
+      { subject_id: "12426", name: "K-On! Movie", name_cn: "轻音少女 剧场版", aliases: [] },
+    ];
+    const started = {
+      ...workspace("awaiting_subject_confirmation", 1),
+      subject_groups: [{
+        intent: { intent_id: intentId, query: "轻音少女", priority: 5, is_primary: true, status: "proposed" },
+        candidates: seasons, status: "ok", warning: null,
+      }],
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/api/workspaces")) return json(started);
+      if (url.endsWith("/messages") && !init?.method) return json([]);
+      if (url.includes("/subjects/confirm")) return json(workspace("ready_for_planning", 2));
+      throw new Error(`unexpected ${url} ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TripWorkspace />);
+
+    fireEvent.click(screen.getByRole("button", { name: "开始规划" }));
+    fireEvent.click(await screen.findByRole("button", { name: "选择全部季度与版本" }));
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "确认并整理地点" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const confirmCall = fetchMock.mock.calls.find(([input]) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL ? input.href : input.url;
+      return url.includes("/subjects/confirm");
+    });
+    const body = confirmCall?.[1]?.body;
+    if (typeof body !== "string") throw new Error("Expected a confirmation JSON body");
+    const payload = JSON.parse(body) as { confirmations: { selected_subject_ids: string[] }[] };
+    expect(payload.confirmations[0]?.selected_subject_ids).toEqual(["1424", "3774", "12426"]);
+  });
+
+  it("returns to editable title input when no candidate is found", async () => {
+    const started = {
+      ...workspace("awaiting_subject_confirmation", 1),
+      subject_groups: [{
+        intent: { intent_id: intentId, query: "无法识别的作品", priority: 5, is_primary: true, status: "proposed" },
+        candidates: [], status: "not_found", warning: "没有找到候选",
+      }],
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL ? input.href : input.url;
+      return url.endsWith("/messages") && !init?.method ? json([]) : json(started);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TripWorkspace />);
+
+    fireEvent.click(screen.getByRole("button", { name: "开始规划" }));
+    fireEvent.click(await screen.findByRole("button", { name: "返回修改作品名称" }));
+    expect(screen.getByLabelText("你的巡礼想法")).toBeVisible();
+    expect(screen.getByRole("button", { name: "开始规划" })).toBeVisible();
+  });
+
   it("confirms subjects, plans, previews a PlanPatch, and applies it", async () => {
     const started = workspace("awaiting_subject_confirmation", 1);
     const confirmed = workspace("ready_for_planning", 2);

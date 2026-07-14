@@ -4,7 +4,7 @@
 Implement the authoritative remediation specification across the real product path, preserve legacy compatibility/regressions, and finish only when scenarios A–J pass or a genuine user-only blocker is documented honestly.
 
 ## Current Phase
-Phase 16 in progress — focused workspace map and initial-state correction
+Phase 17 in progress — arbitrary work discovery and recovery
 
 ## Phases
 
@@ -136,6 +136,15 @@ Phase 16 in progress — focused workspace map and initial-state correction
 - [x] Commit and push the correction to the current branch
 - **Status:** complete (`make verify-all` PASS; committed and pushed in this handoff)
 
+### Phase 17: Arbitrary work discovery and recovery
+- [x] Reproduce the missing-candidate failure with “轻音少女” and trace the actual Provider path
+- [x] Make ordinary valid titles discoverable without relying on the tiny fixture candidate list
+- [x] Allow one natural title intent to confirm multiple seasons/films and merge their shared places
+- [x] Add an in-flow correction/retry path when no candidate is found
+- [x] Verify subject confirmation, Anitabi evidence retrieval, and map behavior with the new title
+- [x] Run focused gates plus `make verify-all`, then commit and push
+- **Status:** complete (`make verify-all` PASS; committed and pushed in this handoff)
+
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
 2. What code already exists, and which unrelated user changes must be preserved?
@@ -257,6 +266,16 @@ Phase 16 in progress — focused workspace map and initial-state correction
 | In-app browser showed 21 marker elements but zero inside the map viewport | 1 | Import MapLibre's required base stylesheet; the custom elements then receive absolute positioning and all 21 desktop markers become visible |
 | Focused mobile foundation test expected the map empty state while the conversation tab was active | 1 | Switch to the mobile map tab before asserting its intentionally hidden panel |
 | Focused scene-detail test assumed episode references are only numbered episodes or unknown | 2 | Assert the scene evidence card itself because valid records can also identify CD or other non-episode material and may omit a source URL |
+| Phase 17 configuration search included nonexistent legacy Compose filenames | 1 | Keep the valid `compose.yaml` and `.env.example` results; restrict later searches to paths that exist |
+| Phase 17 style/test search returned exit 1 because the optional SubjectConfirmation test path had no direct match | 1 | Keep the valid style hits and inspect the component/API schemas directly instead of repeating the compound search |
+| Phase 17 combined import/config search used a malformed quoted regex after returning the file header | 1 | Add the visibly missing `json` import directly and use simple literal searches later |
+| First Phase 17 lint pass rejected the official full-width punctuation in `けいおん！` | 1 | Mark the exact official-title fixture with the existing narrow `RUF001` exemption |
+| Initial multi-season domain patch used stale hierarchical context and applied nothing | 1 | Split the domain, confirmation, scoring, and coverage changes into exact file-local patches |
+| First multi-season focused pass reached Web lint after 34 tests passed, then rejected generic request stringification | 1 | Reuse the test's narrowed string/URL/Request URL extraction before matching the confirmation call |
+| Multi-season strict typing inferred a search-result local across later fixture branches | 1 | Give the search and confirmed-subject results distinct local names so each boundary retains its concrete type |
+| First Phase 17 Compose parse rejected the default User-Agent's colon as an unquoted mapping value | 1 | Quote the complete environment interpolation in both API and MCP service mappings |
+| Phase 17 combined three-service rebuild exceeded the 60-second shell budget | 1 | Inspect images first; MCP finished, so rebuild only the stale API/Web images with a larger bounded budget |
+| First Phase 17 E2E passed desktop but asserted hidden context text on mobile | 1 | Open the mobile `行程信息` tab for the confirmation-count assertion, then return to the map tab for marker verification |
 | The first combined lint-fix patch contained a malformed hunk boundary | 1 | Reissue the exact code and error-log hunks without an empty trailing hunk marker |
 | Focused Web tests still expected the workspace ID after the UI intentionally removed it | 1 | Assert pending-patch recovery while explicitly asserting the diagnostic ID stays hidden |
 | Natural walking recovery copy introduced one full-width comma rejected by Python lint | 1 | Keep the message natural while using the repository's ASCII comma convention |
