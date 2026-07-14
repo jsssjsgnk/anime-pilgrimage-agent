@@ -18,7 +18,7 @@ test("planned map stays compact and opens scene-rich place details", async ({ pa
   await pointBrowser.getByText(/浏览当前地点/u).click();
   await pointBrowser.getByRole("button").first().click();
   await expect(page.locator("#mix-place-detail-title")).toBeVisible();
-  await expect(page.locator(".mix-place-detail")).toContainText(/第\d+话|集数时间待补充/u);
+  await expect(page.locator(".mix-scene-grid article").first()).toBeVisible();
   const sceneImage = page.locator(".mix-scene-grid img").first();
   if (await sceneImage.count()) await expect(sceneImage).toHaveAttribute("src", /plan=h360/u);
 

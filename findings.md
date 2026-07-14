@@ -1,5 +1,19 @@
 # Findings & Decisions
 
+## 2026-07-15 — Initial workspace center-panel defect
+
+- The user screenshot shows the pre-planning center canvas occupying the full 720px workspace shell while containing only a centered four-step label. The resulting whitespace has no informational or interaction purpose.
+- A row of later-stage controls is visibly clipped along the bottom edge, so the initial-state layout is also leaking or overflowing content rather than presenting a self-contained empty state.
+- The UI/UX rules prioritize meaningful empty states, progressive disclosure, stable layout, responsive sizing, and no hidden content behind fixed/overflowing regions. The correction should keep the initial canvas compact and expand only after a workspace exists.
+- The exact rendering bug is a three-way state modeled as a two-way conditional: when `workspace` is `null`, `workspace?.status === "awaiting_subject_confirmation"` is false, so the full map toolbar and empty map branch render after the intro. The intro's `min-height: 100%` pushes those controls below the shell where `overflow: hidden` clips them into the visible bottom edge.
+- The fix must make pre-start, confirmation, and active-workspace states mutually exclusive in JSX. CSS alone would only conceal the invalid render path.
+- The world view is caused by fitting every candidate at once. This corpus contains legitimate distant areas, including locations on opposite sides of the date line; a naive min/max longitude bound spans almost the entire globe and leaves the Japan cluster at the edge.
+- The confirmation path currently chooses `areas[0]`, which is stable but not necessarily the user's most useful cluster. The default should be the largest canonical-place area, while “全部区域” remains an explicit overview choice.
+- Map initialization also recreates the entire MapLibre instance whenever selection highlighting changes. The safer contract is to render all currently filtered points but fit the camera to an explicit focus subset, normally the selected area or dominant area before planning.
+- The local browser proved that the data layer was not empty: 21 marker buttons existed and the camera was already centered on Tokyo, but all 21 were outside the viewport because the application never imported MapLibre's required base CSS. Importing `maplibre-gl.css` restores the marker positioning and control layout; the product stylesheet can then safely own the red numbered marker appearance.
+- With the base CSS loaded, the desktop focused area shows all 21 markers inside a 661×300 map. Selecting a marker highlights exactly one point and opens its matching scene-evidence card. At 375×812, the map is 307×260 with no horizontal page overflow and the same point set remains available.
+
+
 ## 2026-07-14 — Docker build stall diagnosis
 - BuildKit history shows the API build completed rather than hanging. The delay came from downloading a CUDA PyTorch dependency set for SentenceTransformers and exporting a 16.9 GB image.
 - The official uv PyTorch integration guide supports an explicit CPU wheel index plus `[tool.uv.sources]` binding for `torch`. This preserves real E5 inference without including CUDA/NVIDIA runtime packages in the Linux API image.

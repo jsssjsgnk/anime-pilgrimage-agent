@@ -11,6 +11,9 @@ test("natural multi-work request requires one explicit confirmation", async ({ p
   await expect(page.getByRole("button", { name: "生成层级行程" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("巡礼地点")).toBeVisible();
   await expect(page.getByRole("button", { name: "批量选择" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "区域" })).not.toHaveValue("all");
+  const focusedMap = page.getByLabel(/巡礼地点地图，共 \d+ 个地点/u);
+  await expect(focusedMap.locator(".mix-map-marker").first()).toBeVisible();
 
   const screenshotName = testInfo.project.name.startsWith("mobile")
     ? "phase-2-mobile.png"

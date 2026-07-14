@@ -4,7 +4,7 @@
 Implement the authoritative remediation specification across the real product path, preserve legacy compatibility/regressions, and finish only when scenarios A–J pass or a genuine user-only blocker is documented honestly.
 
 ## Current Phase
-Phase 14 in progress — authoritative remediation audit and implementation
+Phase 16 in progress — focused workspace map and initial-state correction
 
 ## Phases
 
@@ -127,6 +127,15 @@ Phase 14 in progress — authoritative remediation audit and implementation
 - [x] Run focused and aggregate gates, document results, commit, and push
 - **Status:** complete (`make verify-all` PASS; commit and push follow in this handoff)
 
+### Phase 16: Workspace initial-state canvas correction
+- [x] Reproduce the desktop initial-state layout defect and identify the sizing/overflow cause
+- [x] Replace the oversized empty center canvas with a compact, informative empty state
+- [x] Ensure no hidden toolbar or content edge leaks below the initial viewport
+- [x] Default the map to the dominant local area and render visible, clickable numbered point markers
+- [x] Verify desktop, mobile, lint, typecheck, unit, and focused browser acceptance
+- [x] Commit and push the correction to the current branch
+- **Status:** complete (`make verify-all` PASS; committed and pushed in this handoff)
+
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
 2. What code already exists, and which unrelated user changes must be preserved?
@@ -243,6 +252,11 @@ Phase 14 in progress — authoritative remediation audit and implementation
 | Second Phase 15 lint pass rejected stringifying an `unknown` patch target day | 1 | Narrow the target to a number and format it explicitly before building user-facing operation text |
 | Phase 15 Compose rebuild exceeded the two-minute shell wrapper timeout while Docker buffered output | 1 | Retry with plain progress and a longer bounded timeout, then inspect service health before browser tests |
 | Aggregate Phase 4 mobile E2E had a MapLibre marker intercept another overlapping marker | 1 | Use the accessible checkbox surface for batch selection and an explicit marker event for detail behavior; repeat the mobile test to rule out flakiness |
+| Phase 16 PowerShell inspection command had an unterminated quoted regex | 1 | Split the source read and use a simpler single-quoted `rg` expression instead of retrying the malformed command |
+| Phase 16 first Web lint pass rejected the MapLibre load listener promise and a missing highlight dependency | 1 | Treat the listener registration return value explicitly and separate marker highlighting from camera/map construction without suppressing Hook analysis |
+| In-app browser showed 21 marker elements but zero inside the map viewport | 1 | Import MapLibre's required base stylesheet; the custom elements then receive absolute positioning and all 21 desktop markers become visible |
+| Focused mobile foundation test expected the map empty state while the conversation tab was active | 1 | Switch to the mobile map tab before asserting its intentionally hidden panel |
+| Focused scene-detail test assumed episode references are only numbered episodes or unknown | 2 | Assert the scene evidence card itself because valid records can also identify CD or other non-episode material and may omit a source URL |
 | The first combined lint-fix patch contained a malformed hunk boundary | 1 | Reissue the exact code and error-log hunks without an empty trailing hunk marker |
 | Focused Web tests still expected the workspace ID after the UI intentionally removed it | 1 | Assert pending-patch recovery while explicitly asserting the diagnostic ID stays hidden |
 | Natural walking recovery copy introduced one full-width comma rejected by Python lint | 1 | Keep the message natural while using the repository's ASCII comma convention |

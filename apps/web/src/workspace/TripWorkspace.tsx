@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  ArrowRight,
   Bot,
   CalendarDays,
   Check,
@@ -111,26 +110,40 @@ function pendingPreview(workspace: WorkspaceView): PatchPreview["preview"] | nul
   return patch && impact ? { patch, impact } : null;
 }
 
-function WorkspaceMap({ places, highlightedIds, onSelect }: {
+function preferredAreaId(workspace: WorkspaceView): string {
+  return [...workspace.areas]
+    .sort((left, right) => right.place_ids.length - left.place_ids.length
+      || left.label.localeCompare(right.label))[0]?.area_id ?? "all";
+}
+
+function WorkspaceMap({ places, focusPlaceIds, highlightedIds, onSelect }: {
   places: VisitPlace[];
+  focusPlaceIds: Set<string>;
   highlightedIds: Set<string>;
   onSelect: (placeId: string) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
+  const onSelectRef = useRef(onSelect);
+
+  useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
 
   useEffect(() => {
     if (!container.current || places.length === 0) return;
     markers.current.forEach((marker) => marker.remove());
     map.current?.remove();
+    const focusPlaces = places.filter((place) => focusPlaceIds.has(place.place_id));
+    const cameraPlaces = focusPlaces.length > 0 ? focusPlaces : places;
     const bounds = new maplibregl.LngLatBounds();
-    places.forEach((place) => bounds.extend([place.coordinate.longitude, place.coordinate.latitude]));
+    cameraPlaces.forEach((place) => bounds.extend([place.coordinate.longitude, place.coordinate.latitude]));
+    const firstFocus = cameraPlaces[0];
+    if (!firstFocus) return;
     const instance = new maplibregl.Map({
       container: container.current,
       style: ROUTE_MAP_STYLE_URL,
-      bounds,
-      fitBoundsOptions: { padding: 70, maxZoom: 15 },
+      center: [firstFocus.coordinate.longitude, firstFocus.coordinate.latitude],
+      zoom: 11,
       attributionControl: { compact: true },
       cooperativeGestures: true,
       dragRotate: false,
@@ -140,23 +153,42 @@ function WorkspaceMap({ places, highlightedIds, onSelect }: {
     map.current = instance;
     markers.current = places.map((place, index) => {
       const button = document.createElement("button");
-      button.className = `mix-map-marker${place.subject_appearances.length > 1 ? " is-shared" : ""}${highlightedIds.has(place.place_id) ? " is-active" : ""}`;
+      button.className = `mix-map-marker${place.subject_appearances.length > 1 ? " is-shared" : ""}`;
       button.type = "button";
       button.textContent = String(index + 1);
       button.title = place.canonical_name;
       button.setAttribute("aria-label", `查看地点：${place.canonical_name}`);
-      button.addEventListener("click", () => onSelect(place.place_id));
+      button.addEventListener("click", () => onSelectRef.current(place.place_id));
       return new maplibregl.Marker({ element: button })
         .setLngLat([place.coordinate.longitude, place.coordinate.latitude])
         .addTo(instance);
     });
+    const fitCamera = () => {
+      instance.resize();
+      if (cameraPlaces.length === 1) {
+        instance.jumpTo({
+          center: [firstFocus.coordinate.longitude, firstFocus.coordinate.latitude],
+          zoom: 14,
+        });
+      } else {
+        instance.fitBounds(bounds, { padding: 70, maxZoom: 15, duration: 0 });
+      }
+    };
+    if (instance.loaded()) fitCamera(); else void instance.once("load", fitCamera);
     return () => {
       markers.current.forEach((marker) => marker.remove());
       markers.current = [];
       instance.remove();
       map.current = null;
     };
-  }, [places, highlightedIds, onSelect]);
+  }, [focusPlaceIds, places]);
+
+  useEffect(() => {
+    markers.current.forEach((marker, index) => {
+      const place = places[index];
+      if (place) marker.getElement().classList.toggle("is-active", highlightedIds.has(place.place_id));
+    });
+  }, [highlightedIds, places]);
 
   if (places.length === 0) {
     return (
@@ -274,7 +306,7 @@ export function TripWorkspace() {
         setMessages(restoredMessages);
         setPreview(pendingPreview(restoredWorkspace));
         if (restoredWorkspace.itineraries.length > 0) setFilter("scheduled");
-        else setAreaFilter(restoredWorkspace.areas[0]?.area_id ?? "all");
+        else setAreaFilter(preferredAreaId(restoredWorkspace));
       })
       .catch(() => window.sessionStorage.removeItem(STORAGE_KEY))
       .finally(() => setBusy(false));
@@ -293,6 +325,15 @@ export function TripWorkspace() {
     return true;
   }), [areaFilter, confidenceFilter, filter, scheduledIds, subjectFilter, workspace]);
   const placeById = useMemo(() => new Map((workspace?.places ?? []).map((place) => [place.place_id, place])), [workspace]);
+  const mapFocusIds = useMemo(() => {
+    if (!workspace) return new Set<string>();
+    if (areaFilter !== "all") {
+      return new Set(workspace.areas.find((area) => area.area_id === areaFilter)?.place_ids ?? []);
+    }
+    if (filter === "scheduled" && scheduledIds.size > 0) return scheduledIds;
+    const preferred = preferredAreaId(workspace);
+    return new Set(workspace.areas.find((area) => area.area_id === preferred)?.place_ids ?? []);
+  }, [areaFilter, filter, scheduledIds, workspace]);
 
   async function startWorkspace(event: FormEvent) {
     event.preventDefault();
@@ -346,7 +387,7 @@ export function TripWorkspace() {
           })),
         }),
       });
-      setWorkspace(body); setAreaFilter(body.areas[0]?.area_id ?? "all"); setActiveStage("map");
+      setWorkspace(body); setAreaFilter(preferredAreaId(body)); setActiveStage("map");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "确认失败"); }
     finally { setBusy(false); }
   }
@@ -509,7 +550,7 @@ export function TripWorkspace() {
         ))}
       </nav>
 
-      <div className="mix-shell">
+      <div className={`mix-shell${workspace ? "" : " is-empty"}`}>
         <aside className={`mix-pane mix-conversation ${activeStage === "conversation" ? "is-mobile-active" : ""}`} aria-label="规划对话">
           <div className="mix-pane-title"><MessageSquareText aria-hidden="true" /><div><strong>规划助手</strong><span>聊聊你的行程</span></div></div>
           {!workspace ? (
@@ -537,8 +578,22 @@ export function TripWorkspace() {
         </aside>
 
         <section className={`mix-pane mix-canvas ${activeStage === "map" ? "is-mobile-active" : ""}`} id="mix-canvas" aria-label="地图与行程画布">
-          {workspace ? <ProgressCounts workspace={workspace} /> : <div className="mix-canvas-intro"><Layers3 aria-hidden="true" /><span>场景资料</span><ArrowRight aria-hidden="true" /><span>巡礼地点</span><ArrowRight aria-hidden="true" /><span>游览区域</span><ArrowRight aria-hidden="true" /><span>日程</span></div>}
-          {workspace?.status === "awaiting_subject_confirmation" ? (
+          {!workspace ? (
+            <div className="mix-canvas-empty">
+              <div className="mix-canvas-empty-icon"><Layers3 aria-hidden="true" /></div>
+              <span className="mix-kicker">准备开始</span>
+              <h2>地点地图会在这里生成</h2>
+              <p>提交左侧的巡礼想法后，我会先请你确认作品，再把场景整理成可规划的真实地点。</p>
+              <ol>
+                <li><strong>1</strong><span><b>确认作品</b><small>避免同名或相似作品混淆</small></span></li>
+                <li><strong>2</strong><span><b>整理地点</b><small>合并重复场景并聚焦主要区域</small></span></li>
+                <li><strong>3</strong><span><b>安排日程</b><small>按日期和步行偏好生成路线</small></span></li>
+              </ol>
+            </div>
+          ) : (
+            <>
+              <ProgressCounts workspace={workspace} />
+          {workspace.status === "awaiting_subject_confirmation" ? (
             <SubjectConfirmation workspace={workspace} busy={busy} onConfirm={confirmSubjects} />
           ) : (
             <>
@@ -559,7 +614,8 @@ export function TripWorkspace() {
                 <ul className="mix-bulk-options" aria-label="批量选择地点">{filteredPlaces.map((place) => <li key={place.place_id}><label><input type="checkbox" checked={selectedPlaceIds.has(place.place_id)} onChange={() => { setSelectedPlaceId(place.place_id); setSelectedPlaceIds((current) => { const next = new Set(current); if (next.has(place.place_id)) next.delete(place.place_id); else next.add(place.place_id); return next; }); }} /><span>{place.canonical_name}</span></label></li>)}</ul>
                 <div className="mix-bulk-actions"><button disabled={batchPlaces.length === 0} onClick={() => void previewPlacePatch(batchPlaces, "include")}>批量加入</button><button disabled={batchPlaces.length === 0} onClick={() => void previewPlacePatch(batchPlaces, "exclude")}>批量排除</button>{currentItinerary?.days.map((day, index) => <button disabled={batchPlaces.length === 0} key={day.date} onClick={() => void previewPlacePatch(batchPlaces, "move_day", index + 1)}>移到第 {index + 1} 天</button>)}</div>
               </div>}
-              <WorkspaceMap places={filteredPlaces} highlightedIds={highlightedIds} onSelect={selectMapPlace} />
+              <WorkspaceMap places={filteredPlaces} focusPlaceIds={mapFocusIds} highlightedIds={highlightedIds} onSelect={selectMapPlace} />
+              {areaFilter === "all" && filter !== "scheduled" && <p className="mix-map-focus-note">地图先聚焦点位最集中的区域；选择“区域”可查看其他地点。</p>}
               {filteredPlaces.length > 0 && <details className="mix-point-browser"><summary>浏览当前地点（{filteredPlaces.length}）</summary><ul>{filteredPlaces.map((place) => <li key={place.place_id}><button type="button" onClick={() => setSelectedPlaceId(place.place_id)}>{place.canonical_name}</button></li>)}</ul></details>}
               {workspace && workspace.places.some((place) => place.subject_appearances.length > 1) && <p className="mix-map-legend"><span />双色点位表示多作品共享的同一真实地点</p>}
               {selectedPlace && (
@@ -584,6 +640,8 @@ export function TripWorkspace() {
                   </div>
                 </section>
               )}
+            </>
+          )}
             </>
           )}
         </section>

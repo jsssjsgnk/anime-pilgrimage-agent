@@ -7,6 +7,12 @@ test("single conversational workspace is responsive", async ({ page }, testInfo)
   await expect(page.getByRole("heading", { name: "多作品巡礼工作区" })).toBeVisible();
   await expect(page.getByLabel("你的巡礼想法")).toHaveValue(/孤独摇滚/u);
   await expect(page.getByText("仅提供只读规划，不执行预订或付款")).toBeVisible();
+  if (testInfo.project.name.startsWith("mobile")) {
+    await page.getByRole("button", { name: "地图与行程" }).click();
+  }
+  await expect(page.getByRole("heading", { name: "地点地图会在这里生成" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "全部地点" })).toHaveCount(0);
+  await expect(page.getByLabel("地图筛选")).toHaveCount(0);
   await expect(page.getByText(/Route A|Route B|PlanPatch|Anitabi|目录身份/u)).toHaveCount(0);
   await expect(page.getByText("经典路线兼容流程")).toHaveCount(0);
 

@@ -1,5 +1,18 @@
 # Progress Log
 
+### 2026-07-15 - Phase 16 initial canvas correction
+
+- Started from the user-provided desktop screenshot and identified the oversized, mostly empty center panel plus bottom-edge content leakage.
+- Restored the repository plan and re-read the applicable UI/UX and file-planning skills before changing the interface.
+- Read the persisted Pilgrimage Atlas design system and traced the issue to the null-workspace branch rendering later-stage controls after a full-height intro.
+- Traced the world view to all-candidate bounds crossing distant longitudes; planned correction is dominant-area defaulting plus explicit focus bounds rather than treating the global extent as the useful initial view.
+- Implemented mutually exclusive empty/confirmation/map rendering, a structured initial canvas, dominant-area defaulting, and focused camera bounds. The first lint pass found two narrow MapLibre/Hook issues before browser verification; these are being corrected rather than bypassed.
+- Rebuilt the Web image and inspected the real local application through the in-app browser at 1440×900 and 375×812. The initial canvas is now self-contained and exposes no future-stage filters.
+- Browser inspection found 21 point elements but zero visible markers; the missing MapLibre base stylesheet was the root cause. After importing it, all 21 focused desktop markers are visible, numbered, keyboard-addressable, and clickable; selection opens the matching scene image/evidence detail.
+- The default area is now the largest canonical-place cluster instead of `all`, so the initial map opens around the useful Tokyo neighborhood rather than at world scale. The explicit area selector still allows switching clusters.
+- Focused quality checks pass: Web lint, strict typecheck, six unit tests, and six desktop/mobile Playwright scenarios covering initial layout, natural multi-work confirmation, visible markers, compact maps, scene detail, and batch selection.
+- Final `make verify-all` passed in 449.5 seconds: 132 Python tests at 80.43% coverage, 6 Web unit tests, 10 desktop/mobile E2E tests, clean Compose rebuild/recovery, real E5/pgvector checks, secret/privacy scans, all six historical phase reports, and remediation A–J.
+
 ## 2026-07-14 — CPU-only E5 container remediation
 - Confirmed the apparent Compose hang was a completed BuildKit job, not an application deadlock: the API image reached 16.9 GB after `uv sync --extra rag` selected CUDA-enabled PyTorch and multiple NVIDIA runtime wheels, then spent several minutes exporting/unpacking layers.
 - Added the official uv explicit `pytorch-cpu` index/source mapping to `pyproject.toml`; the lock still needs regeneration through the authorized Conda environment because no repository-local `uv.exe` exists.

@@ -16,6 +16,9 @@ describe("App", () => {
     expect(screen.getByLabelText("你的巡礼想法")).toHaveValue(
       "我想用三天巡礼《孤独摇滚！》和《莉可丽丝》，每天不要走太多路。",
     );
+    expect(screen.getByRole("heading", { name: "地点地图会在这里生成" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "全部地点" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("作品")).not.toBeInTheDocument();
     expect(screen.queryByText(/Route A|Route B|PlanPatch|Anitabi|目录身份/u)).not.toBeInTheDocument();
     expect(screen.queryByText("经典路线兼容流程")).not.toBeInTheDocument();
   });
