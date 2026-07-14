@@ -4,8 +4,19 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class ProviderRuntimeDiagnostic(BaseModel):
+    """Value-safe provider state exposed by runtime diagnostics."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mode: Literal["live", "fixture", "fallback", "imported", "unverified"]
+    configured: bool
+    status: Literal["available", "unavailable", "unverified"]
+    fallback_mode: Literal["imported", "haversine"] | None = None
 
 
 class Settings(BaseSettings):
@@ -18,7 +29,9 @@ class Settings(BaseSettings):
         case_sensitive=True,
     )
 
-    app_env: Literal["development", "test", "production"] = "development"
+    app_env: Literal["development", "test", "production"] = Field(
+        default="development", alias="APP_ENV"
+    )
     database_url: SecretStr = Field(
         default=SecretStr(
             "postgresql+asyncpg://pilgrimage:pilgrimage@localhost:5432/pilgrimage"
@@ -49,9 +62,15 @@ class Settings(BaseSettings):
     ors_api_key: SecretStr | None = Field(default=None, alias="ORS_API_KEY")
     searchapi_api_key: SecretStr | None = Field(default=None, alias="SEARCHAPI_API_KEY")
     searchapi_live_smoke: bool = Field(default=False, alias="SEARCHAPI_LIVE_SMOKE")
-    provider_timeout_seconds: float = 10.0
-    provider_max_attempts: int = 3
-    provider_mode: Literal["fixture", "live"] = "fixture"
+    provider_timeout_seconds: float = Field(
+        default=10.0, gt=0, le=120, alias="PROVIDER_TIMEOUT_SECONDS"
+    )
+    provider_max_attempts: int = Field(
+        default=3, ge=1, le=5, alias="PROVIDER_MAX_ATTEMPTS"
+    )
+    provider_mode: Literal["fixture", "live"] = Field(
+        default="fixture", alias="PROVIDER_MODE"
+    )
     pilgrimage_point_mode: Literal["anitabi", "imported", "fixture"] = Field(
         default="fixture", alias="PILGRIMAGE_POINT_MODE"
     )
@@ -78,6 +97,65 @@ class Settings(BaseSettings):
             "searchapi": bool(self.searchapi_api_key),
             "weather": True,
         }
+
+    def provider_diagnostics(self) -> dict[str, ProviderRuntimeDiagnostic]:
+        """Describe actual provider selection without returning configuration values."""
+
+        if self.provider_mode == "fixture":
+            diagnostics = {
+                name: ProviderRuntimeDiagnostic(
+                    mode="fixture", configured=True, status="available"
+                )
+                for name in ("bangumi", "ors", "open_meteo", "searchapi")
+            }
+        else:
+            diagnostics = {
+                "bangumi": ProviderRuntimeDiagnostic(
+                    mode="live",
+                    configured=bool(self.bangumi_user_agent),
+                    status="available" if self.bangumi_user_agent else "unavailable",
+                ),
+                "ors": ProviderRuntimeDiagnostic(
+                    mode="live" if self.ors_api_key else "fallback",
+                    configured=bool(self.ors_api_key),
+                    status="available",
+                    fallback_mode=None if self.ors_api_key else "haversine",
+                ),
+                "open_meteo": ProviderRuntimeDiagnostic(
+                    mode="live", configured=True, status="available"
+                ),
+                "searchapi": ProviderRuntimeDiagnostic(
+                    mode="live" if self.searchapi_api_key else "unverified",
+                    configured=bool(self.searchapi_api_key),
+                    status=(
+                        "available"
+                        if self.searchapi_api_key and self.searchapi_live_smoke
+                        else "unverified"
+                    ),
+                ),
+            }
+        if self.pilgrimage_point_mode == "fixture":
+            points = ProviderRuntimeDiagnostic(
+                mode="fixture", configured=True, status="available"
+            )
+        elif self.pilgrimage_point_mode == "imported":
+            points = ProviderRuntimeDiagnostic(
+                mode="imported",
+                configured=self.pilgrimage_points_import_path.exists(),
+                status=(
+                    "available"
+                    if self.pilgrimage_points_import_path.exists()
+                    else "unavailable"
+                ),
+            )
+        else:
+            points = ProviderRuntimeDiagnostic(
+                mode="live",
+                configured=True,
+                status="available",
+                fallback_mode="imported",
+            )
+        return {**diagnostics, "anitabi": points}
 
 
 @lru_cache

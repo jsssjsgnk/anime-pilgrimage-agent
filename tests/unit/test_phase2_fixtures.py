@@ -18,14 +18,23 @@ from pilgrimage_agent.domain.models import (
     WeatherForecastQuery,
 )
 from pilgrimage_agent.providers.anitabi import FixtureAnitabiProvider
-from pilgrimage_agent.providers.bangumi import FixtureBangumiSubjectProvider
+from pilgrimage_agent.providers.bangumi import (
+    BangumiSubjectProvider,
+    FixtureBangumiSubjectProvider,
+)
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.cache import MemoryProviderCache, request_fingerprint
-from pilgrimage_agent.providers.ors import FixtureOpenRouteServiceProvider
+from pilgrimage_agent.providers.ors import (
+    FixtureOpenRouteServiceProvider,
+    OpenRouteServiceProvider,
+)
 from pilgrimage_agent.providers.points import build_route_a
-from pilgrimage_agent.providers.searchapi import FixtureSearchApiFlightProvider
+from pilgrimage_agent.providers.searchapi import (
+    FixtureSearchApiFlightProvider,
+    SearchApiFlightProvider,
+)
 from pilgrimage_agent.providers.service import ProviderServices
-from pilgrimage_agent.providers.weather import FixtureOpenMeteoProvider
+from pilgrimage_agent.providers.weather import FixtureOpenMeteoProvider, OpenMeteoProvider
 
 
 async def test_bangumi_fixture_success_empty_and_not_found() -> None:
@@ -140,3 +149,21 @@ def test_fixture_service_composition_and_bounded_cache() -> None:
     )
     assert cache.get(first, now=now) is None
     assert cache.get(second, now=now + timedelta(minutes=2)) is None
+
+
+def test_uppercase_live_mode_composes_real_provider_implementations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROVIDER_MODE", "live")
+    monkeypatch.setenv("BANGUMI_ACCESS_TOKEN", "contract-sentinel")
+    monkeypatch.setenv("ORS_API_KEY", "contract-sentinel")
+    monkeypatch.setenv("SEARCHAPI_API_KEY", "contract-sentinel")
+    settings = Settings(_env_file=None, PILGRIMAGE_POINT_MODE="fixture")
+
+    services = ProviderServices(settings)
+
+    assert settings.provider_mode == "live"
+    assert isinstance(services.bangumi, BangumiSubjectProvider)
+    assert isinstance(services.ors, OpenRouteServiceProvider)
+    assert isinstance(services.weather, OpenMeteoProvider)
+    assert isinstance(services.flights, SearchApiFlightProvider)

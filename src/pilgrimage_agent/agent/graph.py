@@ -59,6 +59,7 @@ from pilgrimage_agent.planning.integrated import (
 )
 from pilgrimage_agent.planning.modification import replan_local_walking
 from pilgrimage_agent.planning.planner import build_route_b, validate_route_b
+from pilgrimage_agent.providers.outcomes import invoke_tool
 from pilgrimage_agent.providers.points import build_route_a
 from pilgrimage_agent.rag.schemas import KnowledgeSearchResult
 
@@ -200,10 +201,22 @@ def build_workflow(
     async def resolve_subject(state: WorkflowState) -> WorkflowState:
         request = TripRequest.model_validate(state["requirements"])
         assert request.anime_query is not None
-        raw = await tools.call(
-            "search_anime_subjects", {"query": request.anime_query, "limit": 5}
+        outcome = await invoke_tool(
+            tools,
+            "search_anime_subjects",
+            {"query": request.anime_query, "limit": 5},
+            SubjectSearchResult,
         )
-        result = SubjectSearchResult.model_validate(raw)
+        if outcome.value is None:
+            return {
+                "status": WorkflowStatus.PARTIAL.value,
+                "phase": "subject_search_unavailable",
+                "warnings": (
+                    outcome.safe_warning
+                    or "Bangumi search is unavailable; no subject was guessed.",
+                ),
+            }
+        result = outcome.value
         if not result.candidates:
             return {
                 "status": WorkflowStatus.PARTIAL.value,
@@ -237,8 +250,19 @@ def build_workflow(
                 "phase": "subject_confirmation_invalid",
                 "warnings": ("A returned Bangumi candidate must be explicitly selected.",),
             }
-        raw = await tools.call("get_anime_subject", {"subject_id": selected})
-        confirmed = ConfirmedSubject.model_validate(raw)
+        outcome = await invoke_tool(
+            tools, "get_anime_subject", {"subject_id": selected}, ConfirmedSubject
+        )
+        if outcome.value is None:
+            return {
+                "status": WorkflowStatus.PARTIAL.value,
+                "phase": "subject_confirmation_unavailable",
+                "warnings": (
+                    outcome.safe_warning
+                    or "The selected subject could not be verified; no match was invented.",
+                ),
+            }
+        confirmed = outcome.value
         return {"phase": "subject_confirmed", "confirmed_subject": _dump(confirmed)}
 
     async def fetch_points(state: WorkflowState) -> WorkflowState:
@@ -251,21 +275,23 @@ def build_workflow(
                 ),
             }
         subject = ConfirmedSubject.model_validate(state["confirmed_subject"])
-        try:
-            raw = await tools.call(
-                "fetch_pilgrimage_points",
-                _dump(PilgrimagePointQuery(subject_id=subject.subject_id, provider="anitabi")),
-            )
-        except Exception:
+        outcome = await invoke_tool(
+            tools,
+            "fetch_pilgrimage_points",
+            _dump(PilgrimagePointQuery(subject_id=subject.subject_id, provider="anitabi")),
+            PilgrimagePointResult,
+        )
+        if outcome.value is None:
             return {
                 "status": WorkflowStatus.PARTIAL.value,
                 "phase": "fetch_points_partial",
                 "warnings": (
-                    "Pilgrimage point Provider was unavailable; confirmed subject data was "
+                    outcome.safe_warning
+                    or "Pilgrimage point Provider was unavailable; confirmed subject data was "
                     "preserved and no points were invented.",
                 ),
             }
-        result = PilgrimagePointResult.model_validate(raw)
+        result = outcome.value
         return {"phase": "fetch_points", "point_result": _dump(result)}
 
     def build_route_a_node(state: WorkflowState) -> WorkflowState:
@@ -292,63 +318,77 @@ def build_workflow(
         geocoded: GeoCoordinate | None = None
         assert request.origin is not None
         assert request.destination is not None
-        try:
-            raw = await tools.call(
-                "geocode_place", {"text": request.destination, "language": "ja", "limit": 3}
-            )
-            places = PlaceSearchResult.model_validate(raw)
-            if places.candidates:
-                geocoded = places.candidates[0].coordinate
-        except (NotImplementedError, ValueError):
-            geocoded = None
+        geocode_outcome = await invoke_tool(
+            tools,
+            "geocode_place",
+            {"text": request.destination, "language": "ja", "limit": 3},
+            PlaceSearchResult,
+        )
+        if geocode_outcome.value and geocode_outcome.value.candidates:
+            geocoded = geocode_outcome.value.candidates[0].coordinate
+        geocode_warning = (
+            (geocode_outcome.safe_warning,)
+            if geocode_outcome.value is None and geocode_outcome.safe_warning
+            else ()
+        )
         options = build_planning_options(request, route_a, geocoded_base=geocoded)
         flight_warning: tuple[str, ...] = ()
         if request.origin_iata and request.destination_iata:
-            try:
-                assert request.start_date is not None
-                assert request.end_date is not None
-                inbound_raw = await tools.call(
-                    "search_flight_options",
-                    _dump(
-                        FlightSearchQuery(
-                            departure_id=request.origin_iata,
-                            arrival_id=request.destination_iata,
-                            outbound_date=request.start_date,
-                            adults=request.adults,
-                            cabin_class=request.cabin_class,
-                            currency=request.currency,
-                        )
-                    ),
-                )
-                outbound_raw = await tools.call(
-                    "search_flight_options",
-                    _dump(
-                        FlightSearchQuery(
-                            departure_id=request.destination_iata,
-                            arrival_id=request.origin_iata,
-                            outbound_date=request.end_date,
-                            adults=request.adults,
-                            cabin_class=request.cabin_class,
-                            currency=request.currency,
-                        )
-                    ),
-                )
+            assert request.start_date is not None
+            assert request.end_date is not None
+            inbound_outcome = await invoke_tool(
+                tools,
+                "search_flight_options",
+                _dump(
+                    FlightSearchQuery(
+                        departure_id=request.origin_iata,
+                        arrival_id=request.destination_iata,
+                        outbound_date=request.start_date,
+                        adults=request.adults,
+                        cabin_class=request.cabin_class,
+                        currency=request.currency,
+                    )
+                ),
+                FlightSearchResult,
+            )
+            outbound_outcome = await invoke_tool(
+                tools,
+                "search_flight_options",
+                _dump(
+                    FlightSearchQuery(
+                        departure_id=request.destination_iata,
+                        arrival_id=request.origin_iata,
+                        outbound_date=request.end_date,
+                        adults=request.adults,
+                        cabin_class=request.cabin_class,
+                        currency=request.currency,
+                    )
+                ),
+                FlightSearchResult,
+            )
+            if inbound_outcome.value and outbound_outcome.value:
                 options = with_flight_options(
                     options,
-                    FlightSearchResult.model_validate(inbound_raw),
-                    FlightSearchResult.model_validate(outbound_raw),
+                    inbound_outcome.value,
+                    outbound_outcome.value,
                     origin=request.origin,
                     destination=request.destination,
                 )
-            except Exception:  # MCP errors degrade to explicit manual choices.
+            else:
                 flight_warning = (
-                    "Flight search was unavailable; manual access remains selectable "
+                    inbound_outcome.safe_warning
+                    or outbound_outcome.safe_warning
+                    or "Flight search was unavailable; manual access remains selectable "
                     "and prices are unknown.",
                 )
         return {
             "phase": "access_planner",
             "planning_options": _dump(options),
-            "warnings": (*state.get("warnings", ()), *flight_warning),
+            "warnings": (
+                *state.get("warnings", ()),
+                *geocode_warning,
+                *flight_warning,
+            ),
         }
 
     def confirm_access(state: WorkflowState) -> WorkflowState:
@@ -432,19 +472,21 @@ def build_workflow(
         assert request.end_date is not None
         weather: WeatherForecastResult | None = None
         weather_warning: tuple[str, ...] = ()
-        try:
-            raw_weather = await tools.call(
-                "get_weather_forecast",
-                {
-                    "coordinate": base.coordinate.model_dump(mode="json"),
-                    "start_date": request.start_date.isoformat(),
-                    "end_date": request.end_date.isoformat(),
-                },
-            )
-            weather = WeatherForecastResult.model_validate(raw_weather)
-        except (NotImplementedError, RuntimeError, ValueError):
+        weather_outcome = await invoke_tool(
+            tools,
+            "get_weather_forecast",
+            {
+                "coordinate": base.coordinate.model_dump(mode="json"),
+                "start_date": request.start_date.isoformat(),
+                "end_date": request.end_date.isoformat(),
+            },
+            WeatherForecastResult,
+        )
+        weather = weather_outcome.value
+        if weather is None:
             weather_warning = (
-                "Weather is unavailable; no weather condition was invented and the plan "
+                weather_outcome.safe_warning
+                or "Weather is unavailable; no weather condition was invented and the plan "
                 "must be reconfirmed before departure.",
             )
         effective_walking = walking_limit(request)
@@ -477,21 +519,24 @@ def build_workflow(
             GeoCoordinate(latitude=point.latitude, longitude=point.longitude)
             for point in candidate_route.points
         )
-        try:
-            raw_matrix = await tools.call(
-                "get_route_matrix",
-                {
-                    "coordinates": [item.model_dump(mode="json") for item in coordinates],
-                    "profile": "foot-walking",
-                },
-            )
-            matrix = RouteMatrix.model_validate(raw_matrix)
-        except (NotImplementedError, RuntimeError, ValueError):
+        matrix_outcome = await invoke_tool(
+            tools,
+            "get_route_matrix",
+            {
+                "coordinates": [item.model_dump(mode="json") for item in coordinates],
+                "profile": "foot-walking",
+            },
+            RouteMatrix,
+        )
+        if matrix_outcome.value is None:
             matrix = haversine_matrix(tuple(coordinates))
             weather_warning = (
                 *weather_warning,
-                "ORS matrix was unavailable; Route B uses a labelled straight-line estimate.",
+                matrix_outcome.safe_warning
+                or "ORS matrix was unavailable; Route B uses a labelled straight-line estimate.",
             )
+        else:
+            matrix = matrix_outcome.value
         candidate_plan = build_route_b(
             route_a=candidate_route,
             base=base,

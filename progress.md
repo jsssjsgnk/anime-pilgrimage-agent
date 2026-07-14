@@ -312,6 +312,42 @@
   - Post-documentation checks passed: full Python/Web lint, full Python/Web typechecks, the six-file documentation contract, and a 1,292-file secret scan.
   - Optional in-app Browser setup remained unavailable due the known runtime initialization fault; no user browser state was inspected. The passing serialized desktop/mobile Playwright acceptance remains the visual/interactive evidence.
 
+### Phase 14: Authoritative remediation audit and implementation
+- **Status:** in progress
+- Session start:
+  - User supplied `anime-agent-remediation-handoff-files.zip` and designated five documents as the next-round authoritative requirements.
+  - Restored the file-based planning context and confirmed the current branch is clean and synchronized before remediation work begins.
+  - Inspected the archive manifest: all entries are relative paths and the required remediation documents are present; extraction will use an isolated repository directory to avoid overwriting current `AGENTS.md` or `START_HERE.md` before comparison.
+  - Extracted the handoff safely to `.remediation-handoff/` and read `REMEDIATION_START_HERE.md` completely.
+  - Confirmed that the audit targets the current `a7350f4` baseline and that the new remediation acceptance document—not the old aggregate gate—is the completion authority.
+  - Read the remediation `AGENTS.md` and current implementation audit completely.
+  - Captured the P0 runtime-truthfulness defect and the P1/P2 domain, Agent, clustering, planning, RAG, and workspace gaps for source-level verification.
+  - Read `docs/11_REMEDIATION_SPEC.md` and `docs/12_IMPLEMENTATION_GUIDE.md` completely.
+  - Recorded the target domain invariants, typed handoff and PlanPatch requirements, recommended deterministic algorithms, RAG rule boundary, and mixed-initiative workspace shape.
+  - Read `docs/13_REMEDIATION_ACCEPTANCE.md` completely and enumerated its ten mandatory product-path scenarios and evidence vocabulary.
+  - Located all historical `docs/01`–`docs/09` and ADRs required by the remediation entry point for compatibility review.
+  - Read historical `docs/01_PRODUCT_SPEC.md` through `docs/04_MEMORY_CONTEXT.md` completely and recorded the retained three-layer planning, provider, MCP, memory, and minimal-context contracts.
+  - Read historical `docs/05_PHASE_ACCEPTANCE.md` through `docs/09_RAG_SPEC.md` and both current ADRs completely.
+  - Completed all reading required by the remediation entry point; next work is source/test/persistence tracing and a remediation requirement matrix.
+  - Verified current config, domain/workflow schemas, persistence records, memory stores, and all Alembic revisions against the audit.
+  - Confirmed the exact provider alias bug, pervasive single-subject boundary, walking-only mutation schema, per-use DB engine, and absence of remediation persistence models.
+  - Read the full LangGraph and FastAPI product paths and verified provider exception inconsistencies, minimal Reviewer context, violation-agnostic replanning, checkpoint-bypassing edits, per-request resources, and disconnected RAG mutations.
+  - Traced provider composition, MCP adapter, clustering/planning, SQL RAG, ingestion, and context implementations.
+  - Verified every audited algorithmic/RAG defect in source, including lexical-gated dense retrieval, missing SQL conflicts, namespace-insensitive document IDs, fixed Tokyo/manual access assumptions, and fake geographic clustering.
+  - Implemented explicit uppercase environment aliases, safe provider-mode diagnostics, Compose propagation, and the generic validated `ToolOutcome` boundary with focused tests.
+  - Routed subject, evidence, geocoding, flights, weather, and matrix graph calls through `ToolOutcome`; added an integrated rate-limit scenario proving geocode/weather degrade and matrix visibly falls back without aborting the trip.
+  - Added lifespan-managed engine/session/RAG/store/MCP/LLM resources and lazy one-time LangGraph checkpointer setup, while retaining a bounded fallback for direct unit calls.
+  - Passed full local lint, strict typechecks and tests after Scenario A work: 86 Python tests at 80.01% coverage and 5 Web tests.
+  - Rebuilt all four Compose services in 166.7 seconds; bounded health checks report all healthy and PostgreSQL available.
+  - Verified safe runtime diagnostics from the running API and wrote `artifacts/remediation-a-runtime-truthfulness.md`, honestly marking credentialed live/SearchAPI evidence UNVERIFIED.
+  - Exercised the running workflow endpoint to initialize lifespan checkpoint resources, then restored the same waiting-confirmation trip successfully without any external Provider call.
+- Error log:
+  - An initial planning-file patch used an outdated heading and failed without changing files; inspected the current tails and reapplied against the exact Phase 14 headings.
+  - Two parallel inventory searches referenced nonexistent legacy-style `services/` and `src/pilgrimage_agent/persistence/` directories; both were read-only failures. Re-ran against the actual flat `persistence.py` and current package tree.
+  - First focused Ruff pass found one unnecessary quoted generic return annotation in the new outcome model; removed the quotes and tightened the test fixture type before rerunning.
+  - First graph-focused Ruff pass found import ordering only in the graph and new degradation test; reordered imports and wrapped the affected expression manually.
+  - Lifespan-focused mypy rejected `AbstractAsyncContextManager` from both `typing` and `collections.abc` under the locked stubs; corrected it to the canonical `contextlib` export.
+
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|

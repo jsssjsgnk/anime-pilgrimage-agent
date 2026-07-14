@@ -22,6 +22,8 @@ test-results/
 # Local runtime data
 .cache/
 .tmp/
+.tmp-conda/
+.remediation-handoff/
 data/
 *.log
 

@@ -1,7 +1,8 @@
 """HTTP API entrypoint."""
 
+from asyncio import Lock
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
@@ -52,7 +53,7 @@ from pilgrimage_agent.agent.schemas import (
     WorkflowResponse,
     WorkflowStatus,
 )
-from pilgrimage_agent.config import get_settings
+from pilgrimage_agent.config import ProviderRuntimeDiagnostic, get_settings
 from pilgrimage_agent.db import session_scope
 from pilgrimage_agent.domain.models import (
     ConfirmedSubject,
@@ -115,6 +116,12 @@ class CapabilityResponse(BaseModel):
     capabilities: dict[str, bool]
 
 
+class RuntimeDiagnosticsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    providers: dict[str, ProviderRuntimeDiagnostic]
+
+
 class PreferenceWriteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -129,10 +136,109 @@ class PreferenceDeleteResponse(BaseModel):
     deleted_count: int = Field(ge=0)
 
 
+class ApplicationResources:
+    """Reusable process resources; external connections are opened lazily."""
+
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self.engine = create_async_engine(
+            self.settings.database_url.get_secret_value(), pool_pre_ping=True
+        )
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.rag_repository = SqlRagRepository(
+            self.sessions,
+            _rag_embedder(),
+            bm25_root=self.settings.rag_bm25_index_dir,
+        )
+        self.store = SqlProjectStore(self.sessions)
+        self.tool_client = LangChainMcpToolClient(
+            url=self.settings.mcp_tools_url,
+            timeout_seconds=self.settings.provider_timeout_seconds,
+        )
+        self.chat_client: JsonChatClient | None = None
+        self.requirement_extractor = None
+        self.reviewer = None
+        self.conversation_responder: ConversationResponder = (
+            DeterministicConversationAgent()
+        )
+        if (
+            self.settings.llm_api_key
+            and self.settings.llm_base_url
+            and self.settings.llm_model
+        ):
+            self.chat_client = JsonChatClient(
+                base_url=self.settings.llm_base_url,
+                model=self.settings.llm_model,
+                api_key=self.settings.llm_api_key.get_secret_value(),
+                timeout_seconds=self.settings.provider_timeout_seconds,
+                max_attempts=self.settings.provider_max_attempts,
+            )
+            self.requirement_extractor = ResilientRequirementExtractor(
+                LlmRequirementExtractor(self.chat_client)
+            )
+            self.reviewer = ResilientReviewer(
+                LlmReviewer(self.chat_client), FixtureReviewer()
+            )
+            self.conversation_responder = ResilientConversationAgent(
+                LlmConversationAgent(self.chat_client)
+            )
+        self._graph: WorkflowGraph | None = None
+        self._checkpoint_context: (
+            AbstractAsyncContextManager[AsyncPostgresSaver] | None
+        ) = None
+        self._graph_lock = Lock()
+
+    async def workflow_graph(self) -> WorkflowGraph:
+        """Initialize checkpoint tables once, on the first workflow operation."""
+
+        if self._graph is not None:
+            return self._graph
+        async with self._graph_lock:
+            if self._graph is not None:
+                return self._graph
+            checkpoint_url = self.settings.database_url.get_secret_value().replace(
+                "postgresql+asyncpg://", "postgresql://", 1
+            )
+            checkpoint_context = AsyncPostgresSaver.from_conn_string(checkpoint_url)
+            checkpointer = await checkpoint_context.__aenter__()
+            try:
+                await checkpointer.setup()
+                self._graph = build_workflow(
+                    checkpointer,
+                    tool_client=self.tool_client,
+                    requirement_extractor=self.requirement_extractor,
+                    reviewer=self.reviewer,
+                    knowledge_retriever=SqlKnowledgeRetriever(self.rag_repository),
+                )
+            except BaseException:
+                await checkpoint_context.__aexit__(None, None, None)
+                raise
+            self._checkpoint_context = checkpoint_context
+            return self._graph
+
+    async def close(self) -> None:
+        if self._checkpoint_context is not None:
+            await self._checkpoint_context.__aexit__(None, None, None)
+        if self.chat_client is not None:
+            await self.chat_client.close()
+        await self.engine.dispose()
+
+
+@asynccontextmanager
+async def _app_lifespan(application: FastAPI) -> AsyncIterator[None]:
+    resources = ApplicationResources()
+    application.state.resources = resources
+    try:
+        yield
+    finally:
+        await resources.close()
+
+
 app = FastAPI(
     title="Anime Pilgrimage Agent API",
     version=__version__,
     description="Read-only planning API; booking and payment are intentionally unsupported.",
+    lifespan=_app_lifespan,
 )
 RAG_FIXTURE_ROOT = Path.cwd() / "fixtures" / "rag"
 CONVERSATION_EVENT = "conversation_message"
@@ -168,7 +274,12 @@ def _rag_embedder() -> EmbeddingProvider:
 
 @asynccontextmanager
 async def _workflow_runtime() -> AsyncIterator[tuple[WorkflowGraph, SqlProjectStore]]:
-    """Open bounded checkpoint/store resources for one HTTP operation."""
+    """Reuse lifespan resources, with a bounded fallback for direct unit calls."""
+
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield await resources.workflow_graph(), resources.store
+        return
 
     settings = get_settings()
     database_url = settings.database_url.get_secret_value()
@@ -213,6 +324,10 @@ async def _workflow_runtime() -> AsyncIterator[tuple[WorkflowGraph, SqlProjectSt
 
 @asynccontextmanager
 async def _knowledge_repository() -> AsyncIterator[SqlRagRepository]:
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield resources.rag_repository
+        return
     settings = get_settings()
     database_url = settings.database_url.get_secret_value()
     engine = create_async_engine(database_url, pool_pre_ping=True)
@@ -227,6 +342,10 @@ async def _knowledge_repository() -> AsyncIterator[SqlRagRepository]:
 
 @asynccontextmanager
 async def _project_store() -> AsyncIterator[SqlProjectStore]:
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield resources.store
+        return
     engine = create_async_engine(
         get_settings().database_url.get_secret_value(), pool_pre_ping=True
     )
@@ -240,6 +359,11 @@ async def _project_store() -> AsyncIterator[SqlProjectStore]:
 async def _conversation_runtime(
 ) -> AsyncIterator[tuple[ConversationResponder, SqlProjectStore]]:
     """Open one bounded conversation operation with an optional structured LLM."""
+
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield resources.conversation_responder, resources.store
+        return
 
     settings = get_settings()
     engine = create_async_engine(
@@ -477,6 +601,13 @@ async def health(check_database: bool = False) -> HealthResponse:
 @app.get("/api/capabilities", response_model=CapabilityResponse)
 async def capabilities() -> CapabilityResponse:
     return CapabilityResponse(capabilities=get_settings().capability_status())
+
+
+@app.get("/api/runtime/diagnostics", response_model=RuntimeDiagnosticsResponse)
+async def runtime_diagnostics() -> RuntimeDiagnosticsResponse:
+    """Expose provider selection and presence flags, never secret values."""
+
+    return RuntimeDiagnosticsResponse(providers=get_settings().provider_diagnostics())
 
 
 @app.get("/api/subjects/search", response_model=SubjectSearchResult)

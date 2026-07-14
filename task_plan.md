@@ -1,10 +1,10 @@
 # Task Plan: Anime Pilgrimage Agent — Six-Phase Delivery
 
 ## Goal
-Read the complete required handoff chain, implement and verify all six project phases, and finish only when `make verify-all` passes or a genuine user-only blocker is documented.
+Implement the authoritative remediation specification across the real product path, preserve legacy compatibility/regressions, and finish only when scenarios A–J pass or a genuine user-only blocker is documented honestly.
 
 ## Current Phase
-Phase 13 complete — continuous trip conversation and a larger Agent role
+Phase 14 in progress — authoritative remediation audit and implementation
 
 ## Phases
 
@@ -105,6 +105,17 @@ Phase 13 complete — continuous trip conversation and a larger Agent role
 - [x] Rebuild Compose and pass affected gates plus `make verify-all`
 - **Status:** complete
 
+### Phase 14: Authoritative remediation audit and implementation
+- [x] Safely extract and fully read the five required remediation documents plus the required historical context
+- [ ] Map every remediation requirement and acceptance scenario to current code/tests (in progress)
+- [ ] Define the new architecture and implementation order without treating old gates as sufficient (in progress)
+- [ ] Implement multi-work support, scene/location consolidation, real clustering, and hierarchical planning
+- [ ] Implement structured Agent communication, context engineering, PlanPatch, and RAG constraint closure
+- [ ] Replace the wizard-like Web flow with a freer workspace while retaining compatible Route views
+- [ ] Add remediation-specific unit/contract/API/Compose/browser gates and fix all failures
+- [ ] Re-run legacy regression gates plus the new remediation acceptance and publish honest reports
+- **Status:** in progress
+
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
 2. What code already exists, and which unrelated user changes must be preserved?
@@ -119,6 +130,7 @@ Phase 13 complete — continuous trip conversation and a larger Agent role
 | Use the official OpenFreeMap Liberty style with visible OpenFreeMap/OpenStreetMap attribution | Restores the specified basemap without an API key while preserving source licensing and a configurable future replacement path |
 | Keep the three verified fixture points but label their scope honestly | Adding unsourced scene coordinates would violate the no-invention and legal-access boundaries |
 | Make conversation trip-scoped and durable, but keep arithmetic, membership, confirmations, and tool execution deterministic | Expands the Agent's role without allowing free-form model output to silently mutate constraints or invent travel facts |
+| Treat the five user-supplied remediation documents as the new authoritative product baseline | The user explicitly superseded the assumption that legacy six-phase acceptance proves feature completeness |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

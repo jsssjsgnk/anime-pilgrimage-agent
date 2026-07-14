@@ -27,6 +27,8 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://pilgrimage:pilgrimage@postgres:5432/pilgrimage
+      PROVIDER_MODE: ${PROVIDER_MODE:-fixture}
+      PILGRIMAGE_POINT_MODE: ${PILGRIMAGE_POINT_MODE:-anitabi}
       RAG_BM25_INDEX_DIR: /app/data/rag-bm25
       RAG_EMBEDDING_MODE: real
       HF_HOME: /app/data/huggingface

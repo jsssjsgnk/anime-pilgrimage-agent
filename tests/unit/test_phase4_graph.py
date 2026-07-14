@@ -1,5 +1,6 @@
 """Integrated Agent graph confirmation, MCP data, failure, and bounded replan behavior."""
 
+from collections.abc import Mapping
 from datetime import date, timedelta
 from hashlib import sha256
 from typing import cast
@@ -9,6 +10,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, Interrupt
 
 from pilgrimage_agent.agent.graph import WorkflowGraph, WorkflowState, build_workflow
+from pilgrimage_agent.agent.mcp_client import FixtureAgentToolClient
 from pilgrimage_agent.agent.review import FixtureReviewer
 from pilgrimage_agent.api.main import _workflow_response
 from pilgrimage_agent.domain.models import RouteA
@@ -17,6 +19,7 @@ from pilgrimage_agent.planning.modification import (
     parse_local_modification,
     replan_local_walking,
 )
+from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 
 START = date.today() + timedelta(days=60)
 INITIAL: WorkflowState = {
@@ -77,6 +80,24 @@ async def _advance_three_confirmations(
         base_id="route-centroid",
     )
     return first, second, third, fourth
+
+
+class SelectiveFailureTools(FixtureAgentToolClient):
+    def __init__(self, failures: frozenset[str]) -> None:
+        super().__init__()
+        self.failures = failures
+
+    async def call(
+        self, name: str, arguments: Mapping[str, object]
+    ) -> dict[str, object]:
+        if name in self.failures:
+            raise ProviderError(
+                kind=ProviderErrorKind.RATE_LIMIT,
+                provider=name,
+                safe_message="Fixture rate limit.",
+                retryable=True,
+            )
+        return await super().call(name, arguments)
 
 
 async def test_graph_interrupts_three_times_then_completes_with_real_models() -> None:
@@ -188,3 +209,26 @@ async def test_agent_presents_flights_beside_manual_options_when_iata_is_confirm
         "cheapest",
         "fewest_transfers",
     }
+
+
+async def test_live_style_provider_failures_degrade_through_workflow() -> None:
+    tools = SelectiveFailureTools(
+        frozenset({"geocode_place", "get_weather_forecast", "get_route_matrix"})
+    )
+    graph = build_workflow(InMemorySaver(), tool_client=tools)
+
+    result = (
+        await _advance_three_confirmations(
+            graph, _config("typed-provider-degradation")
+        )
+    )[3]
+
+    assert result["status"] == "complete"
+    assert "weather" not in result
+    assert RouteBPlan.model_validate(result["route_b"]).matrix_status == (
+        "straight_line_estimate"
+    )
+    warnings = " ".join(result["warnings"])
+    assert "geocode_place: Fixture rate limit." in warnings
+    assert "get_weather_forecast: Fixture rate limit." in warnings
+    assert "get_route_matrix: Fixture rate limit." in warnings
