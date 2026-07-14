@@ -354,6 +354,17 @@
   - One intermediate combined patch again contained an invalid empty hunk and made no changes; reapplied the migration/ORM/progress edits with valid adjacent context.
   - Passed full domain-foundation regression: lint, strict Python/TypeScript typing, 95 Python tests at 81.60% coverage, and 5 Web tests.
   - Wrote `artifacts/remediation-domain-foundation.md` with explicit PASS/PARTIAL scenario interpretation and migration evidence.
+  - Implemented legacy point→SceneEvidence normalization, deterministic complete-link place resolution with explicit exit conflicts/ambiguity/overrides/quarantine, and stable canonical IDs/medoids/appearances.
+  - Implemented Haversine DBSCAN over VisitPlace plus optional road-time outlier correction, recorded parameters/version/status, fallback warnings, and a no-loss membership assertion.
+  - First curation static pass found one 102-character ambiguity explanation; wrapped the string without changing behavior.
+  - Place/area static checks passed. The first override test expected two places, but its own split override intentionally creates two shared-location places plus one merged-exit place (three total); corrected the assertion while retaining exact membership/re-ingestion checks.
+  - Added the area-first/day-assignment/place-selection/nearest-neighbor+bounded-2-opt hierarchical planner, candidate graph construction, explainable strategy score components, timezone/access windows, coverage/omission accounting, and deterministic validations.
+  - First hierarchical static pass found one unused import and requested `itertools.pairwise`; applied both mechanical corrections.
+  - Passed ten focused place-resolution, DBSCAN-area, and hierarchical-planning tests after lint and strict source typing.
+  - Added the Workspace Agent product path with 1–3 independent subject candidate groups, explicit per-intent confirmation, isolated evidence failures, deterministic evidence→place→area curation, estimated-base disclosure, two strategy versions, and typed role handoffs.
+  - Added progressive workspace/evidence views and namespace/state-version-checked `/api/workspaces` start/read/confirm/evidence/plan endpoints while retaining the old workflow routes as compatibility APIs.
+  - Added and passed focused Agent/API coverage for three subjects, one isolated Anitabi failure, shared-place multi-work coverage without duplicate visits, two independent strategy versions, hidden-by-default evidence, namespace isolation, persisted events, and stale-version rejection.
+  - Passed full repository regression for this slice: Ruff, Python/TypeScript strict typing, 108 Python tests at 82.37% coverage, and 5 Web tests.
 - Error log:
   - An initial planning-file patch used an outdated heading and failed without changing files; inspected the current tails and reapplied against the exact Phase 14 headings.
   - Two parallel inventory searches referenced nonexistent legacy-style `services/` and `src/pilgrimage_agent/persistence/` directories; both were read-only failures. Re-ran against the actual flat `persistence.py` and current package tree.
@@ -369,3 +380,12 @@
 | What's the goal? | Deliver the verified pilgrimage Agent with sourced points, deterministic planning, and durable multi-turn conversation |
 | What have I learned? | See `findings.md` |
 | What have I done? | Completed Phases 1–13, integrated Anitabi and the runtime Agent, added persistent conversation, and passed `make verify-all` |
+### 2026-07-14 - Development tool entry points are outside `conda run` PATH
+
+- Running `conda run ... ruff` / `mypy`, then `python -m ruff` / `mypy`, showed that the modules are not installed in the environment's Python site-packages.
+- The locked `uv.exe` is present under the environment's `Library/bin`, which `conda run` did not expose on Windows. Resolution: invoke that exact executable for the repository's canonical `uv run` lint/typecheck commands.
+
+### 2026-07-14 - Workspace Agent test fixture initially over-merged nearby records
+
+- The first multi-subject fixture put two intentionally distinct locations inside the 100 m place-resolution radius, so deterministic resolution correctly merged them and the expected canonical-place count failed.
+- Resolution: moved the distinct fixture points beyond the place-resolution radius while keeping them inside one 1.2 km area cluster. The remaining assertion was corrected to use the user-facing subject-intent warning label rather than an internal catalog ID.

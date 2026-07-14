@@ -109,7 +109,7 @@ Phase 14 in progress — authoritative remediation audit and implementation
 - [x] Safely extract and fully read the five required remediation documents plus the required historical context
 - [ ] Map every remediation requirement and acceptance scenario to current code/tests (in progress)
 - [ ] Define the new architecture and implementation order without treating old gates as sufficient (in progress)
-- [ ] Implement multi-work support, scene/location consolidation, real clustering, and hierarchical planning
+- [x] Implement multi-work support, scene/location consolidation, real clustering, and hierarchical planning
 - [ ] Implement structured Agent communication, context engineering, PlanPatch, and RAG constraint closure
 - [ ] Replace the wizard-like Web flow with a freer workspace while retaining compatible Route views
 - [ ] Add remediation-specific unit/contract/API/Compose/browser gates and fix all failures
@@ -131,6 +131,7 @@ Phase 14 in progress — authoritative remediation audit and implementation
 | Keep the three verified fixture points but label their scope honestly | Adding unsourced scene coordinates would violate the no-invention and legal-access boundaries |
 | Make conversation trip-scoped and durable, but keep arithmetic, membership, confirmations, and tool execution deterministic | Expands the Agent's role without allowing free-form model output to silently mutate constraints or invent travel facts |
 | Treat the five user-supplied remediation documents as the new authoritative product baseline | The user explicitly superseded the assumption that legacy six-phase acceptance proves feature completeness |
+| Make `/api/workspaces` the remediated product path and retain `/api/workflows` only as a schema-isolated compatibility path | Prevents legacy Route A/B response assumptions from constraining multi-subject evidence, place, area, and strategy versions |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

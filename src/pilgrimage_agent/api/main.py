@@ -53,6 +53,16 @@ from pilgrimage_agent.agent.schemas import (
     WorkflowResponse,
     WorkflowStatus,
 )
+from pilgrimage_agent.agent.workspace import (
+    ConfirmWorkspaceSubjectsRequest,
+    PlanWorkspaceRequest,
+    WorkspaceAgent,
+    WorkspaceEvidenceView,
+    WorkspaceStartRequest,
+    WorkspaceState,
+    WorkspaceView,
+    workspace_view,
+)
 from pilgrimage_agent.config import ProviderRuntimeDiagnostic, get_settings
 from pilgrimage_agent.db import session_scope
 from pilgrimage_agent.domain.models import (
@@ -72,7 +82,7 @@ from pilgrimage_agent.domain.planning import (
     ValidationIssue,
 )
 from pilgrimage_agent.memory.schemas import StoredEvent, StoredPreference, StoredTrip
-from pilgrimage_agent.memory.store import SqlProjectStore
+from pilgrimage_agent.memory.store import ProjectStore, SqlProjectStore
 from pilgrimage_agent.planning.demo import fixture_route_a, plan_demo_route_b, planning_options
 from pilgrimage_agent.planning.modification import (
     parse_local_modification,
@@ -182,6 +192,9 @@ class ApplicationResources:
             self.conversation_responder = ResilientConversationAgent(
                 LlmConversationAgent(self.chat_client)
             )
+        self.workspace_agent = WorkspaceAgent(
+            self.tool_client, self.requirement_extractor
+        )
         self._graph: WorkflowGraph | None = None
         self._checkpoint_context: (
             AbstractAsyncContextManager[AsyncPostgresSaver] | None
@@ -356,6 +369,32 @@ async def _project_store() -> AsyncIterator[SqlProjectStore]:
 
 
 @asynccontextmanager
+async def _workspace_runtime() -> AsyncIterator[tuple[WorkspaceAgent, ProjectStore]]:
+    """Reuse the process Agent and project-owned store for one workspace operation."""
+
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield resources.workspace_agent, resources.store
+        return
+    settings = get_settings()
+    engine = create_async_engine(
+        settings.database_url.get_secret_value(), pool_pre_ping=True
+    )
+    try:
+        agent = WorkspaceAgent(
+            LangChainMcpToolClient(
+                url=settings.mcp_tools_url,
+                timeout_seconds=settings.provider_timeout_seconds,
+            )
+        )
+        yield agent, SqlProjectStore(
+            async_sessionmaker(engine, expire_on_commit=False)
+        )
+    finally:
+        await engine.dispose()
+
+
+@asynccontextmanager
 async def _conversation_runtime(
 ) -> AsyncIterator[tuple[ConversationResponder, SqlProjectStore]]:
     """Open one bounded conversation operation with an optional structured LLM."""
@@ -477,6 +516,58 @@ async def _save_workflow(
         "workflow_transition",
         {"phase": response.phase, "status": response.status.value},
     )
+
+
+async def _save_workspace(
+    store: ProjectStore, state: WorkspaceState, event_type: str
+) -> None:
+    await store.save_trip(
+        StoredTrip(
+            trip_id=state.trip_id,
+            owner_user_id=state.owner_user_id,
+            thread_id=state.thread_id,
+            state=cast(
+                dict[str, object], state.model_dump(mode="json")
+            ),
+        )
+    )
+    await store.append_event(
+        state.owner_user_id,
+        state.trip_id,
+        event_type,
+        {
+            "schema_version": state.schema_version,
+            "state_version": state.state_version,
+            "status": state.status.value,
+        },
+    )
+
+
+async def _load_workspace(
+    store: ProjectStore,
+    owner_user_id: str,
+    thread_id: str,
+    trip_id: UUID,
+) -> WorkspaceState:
+    trip = await store.get_trip(owner_user_id, thread_id, trip_id)
+    if trip is None:
+        raise HTTPException(
+            status_code=404, detail="Workspace was not found in this namespace"
+        )
+    try:
+        return WorkspaceState.model_validate(trip.state)
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="This trip uses the legacy workflow schema, not workspace schema v2",
+        ) from error
+
+
+def _workspace_value_error(error: ValueError) -> HTTPException:
+    detail = str(error)
+    conflict_markers = ("version conflict", "namespace mismatch", "must belong")
+    status_code = 409 if any(item in detail for item in conflict_markers) else 422
+    return HTTPException(status_code=status_code, detail=detail)
 
 
 def _conversation_message(event: StoredEvent) -> ConversationMessage | None:
@@ -648,6 +739,91 @@ async def get_planning_options() -> PlanningOptions:
 async def route_b(subject_id: str, request: RouteBRequest) -> RouteBPlan:
     route = await fixture_route_a(subject_id)
     return await plan_demo_route_b(route, request)
+
+
+@app.post("/api/workspaces", response_model=WorkspaceView)
+async def start_workspace(request: WorkspaceStartRequest) -> WorkspaceView:
+    """Start the multi-subject workspace without exposing raw evidence by default."""
+
+    async with _workspace_runtime() as (agent, store):
+        existing = await store.get_trip(
+            request.owner_user_id, request.thread_id, request.trip_id
+        )
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="Workspace already exists")
+        try:
+            state = await agent.start(request)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, state, "workspace_started")
+    return workspace_view(state)
+
+
+@app.get("/api/workspaces/{trip_id}", response_model=WorkspaceView)
+async def get_workspace(
+    trip_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    thread_id: str = Query(min_length=1, max_length=120),
+) -> WorkspaceView:
+    async with _workspace_runtime() as (_agent, store):
+        state = await _load_workspace(store, owner_user_id, thread_id, trip_id)
+    return workspace_view(state)
+
+
+@app.get(
+    "/api/workspaces/{trip_id}/evidence",
+    response_model=WorkspaceEvidenceView,
+)
+async def get_workspace_evidence(
+    trip_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    thread_id: str = Query(min_length=1, max_length=120),
+) -> WorkspaceEvidenceView:
+    """Return the opt-in evidence inspector projection for curation work."""
+
+    async with _workspace_runtime() as (_agent, store):
+        state = await _load_workspace(store, owner_user_id, thread_id, trip_id)
+    return WorkspaceEvidenceView(
+        trip_id=state.trip_id,
+        evidence=state.evidence,
+        quarantined=state.quarantined,
+        ambiguous_merges=state.ambiguous_merges,
+    )
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/subjects/confirm",
+    response_model=WorkspaceView,
+)
+async def confirm_workspace_subjects(
+    trip_id: UUID, request: ConfirmWorkspaceSubjectsRequest
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(
+            store, request.owner_user_id, request.thread_id, trip_id
+        )
+        try:
+            updated = await agent.confirm_subjects(state, request)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_subjects_confirmed")
+    return workspace_view(updated)
+
+
+@app.post("/api/workspaces/{trip_id}/plan", response_model=WorkspaceView)
+async def plan_workspace(
+    trip_id: UUID, request: PlanWorkspaceRequest
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(
+            store, request.owner_user_id, request.thread_id, trip_id
+        )
+        try:
+            updated = agent.plan(state, request)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_planned")
+    return workspace_view(updated)
 
 
 @app.post("/api/workflows", response_model=WorkflowResponse)
