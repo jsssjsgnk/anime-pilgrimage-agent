@@ -47,6 +47,12 @@ class TripRequest(StrictModel):
     anime_query: str | None = Field(default=None, max_length=200)
     budget_level: Literal["low", "medium", "high"] | None = None
     walking_preference: Literal["low", "medium", "high"] | None = None
+    max_walking_meters_per_day: float | None = Field(default=None, gt=0, le=50_000)
+    origin_iata: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    destination_iata: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    adults: int = Field(default=1, ge=1, le=9)
+    cabin_class: Literal["economy", "premium_economy", "business", "first"] = "economy"
+    currency: str = Field(default="JPY", pattern=r"^[A-Z]{3}$")
     must_visit_point_ids: tuple[UUID, ...] = ()
     excluded_point_ids: tuple[UUID, ...] = ()
 
@@ -97,12 +103,13 @@ class PilgrimagePoint(StrictModel):
     longitude: Longitude
     episode_refs: tuple[str, ...] = ()
     confidence: Literal["verified", "community", "unverified"]
+    source_label: str | None = Field(default=None, max_length=200)
     provenance: DataProvenance
 
 
 class PilgrimagePointQuery(StrictModel):
     subject_id: str = Field(min_length=1, max_length=50)
-    provider: Literal["imported", "fixture"] = "imported"
+    provider: Literal["anitabi", "imported", "fixture"] = "anitabi"
 
 
 class PilgrimagePointResult(StrictModel):
@@ -227,6 +234,14 @@ class FlightSegment(StrictModel):
     carrier: str = Field(min_length=1, max_length=100)
     flight_number: str | None = Field(default=None, max_length=30)
 
+    @model_validator(mode="after")
+    def timestamps_are_aware_and_ordered(self) -> "FlightSegment":
+        if self.departure_at.utcoffset() is None or self.arrival_at.utcoffset() is None:
+            raise ValueError("flight segment timestamps must include timezone offsets")
+        if self.arrival_at <= self.departure_at:
+            raise ValueError("flight segment arrival must follow departure")
+        return self
+
 
 class FlightOption(StrictModel):
     option_id: str = Field(min_length=1, max_length=200)
@@ -234,9 +249,26 @@ class FlightOption(StrictModel):
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     duration_minutes: int = Field(ge=0)
     stops: int = Field(ge=0)
-    segments: tuple[FlightSegment, ...]
+    segments: tuple[FlightSegment, ...] = Field(min_length=1)
     confirmation_url: HttpUrl | None = None
     provenance: DataProvenance
+
+    @model_validator(mode="after")
+    def segments_are_continuous_and_duration_is_deterministic(self) -> "FlightOption":
+        if self.stops != len(self.segments) - 1:
+            raise ValueError("flight stop count must match the segment sequence")
+        for previous, current in zip(self.segments, self.segments[1:], strict=False):
+            if previous.arrival_airport != current.departure_airport:
+                raise ValueError("connecting flight airports must be continuous")
+            if current.departure_at < previous.arrival_at:
+                raise ValueError("a connecting flight cannot depart before arrival")
+        elapsed_minutes = int(
+            (self.segments[-1].arrival_at - self.segments[0].departure_at).total_seconds()
+            // 60
+        )
+        if self.duration_minutes != elapsed_minutes:
+            raise ValueError("flight duration must equal timezone-aware elapsed time")
+        return self
 
 
 class FlightSearchResult(StrictModel):

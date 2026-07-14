@@ -17,11 +17,12 @@ from pilgrimage_agent.domain.models import (
     SubjectSearchQuery,
     WeatherForecastQuery,
 )
+from pilgrimage_agent.providers.anitabi import FixtureAnitabiProvider
 from pilgrimage_agent.providers.bangumi import FixtureBangumiSubjectProvider
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.cache import MemoryProviderCache, request_fingerprint
 from pilgrimage_agent.providers.ors import FixtureOpenRouteServiceProvider
-from pilgrimage_agent.providers.points import FixturePilgrimagePointProvider, build_route_a
+from pilgrimage_agent.providers.points import build_route_a
 from pilgrimage_agent.providers.searchapi import FixtureSearchApiFlightProvider
 from pilgrimage_agent.providers.service import ProviderServices
 from pilgrimage_agent.providers.weather import FixtureOpenMeteoProvider
@@ -40,7 +41,7 @@ async def test_bangumi_fixture_success_empty_and_not_found() -> None:
 
 
 async def test_route_fixture_and_ors_fixture_contracts() -> None:
-    point_provider = FixturePilgrimagePointProvider(Path("unused"))
+    point_provider = FixtureAnitabiProvider(Path("unused"))
     imported = await point_provider.fetch(
         PilgrimagePointQuery(subject_id="328609", provider="fixture")
     )
@@ -113,6 +114,7 @@ def test_fixture_service_composition_and_bounded_cache() -> None:
         )
     )
     assert isinstance(services.bangumi, FixtureBangumiSubjectProvider)
+    assert isinstance(services.points, FixtureAnitabiProvider)
     assert isinstance(services.ors, FixtureOpenRouteServiceProvider)
 
     cache: MemoryProviderCache[str] = MemoryProviderCache(max_items=1)

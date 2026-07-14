@@ -30,6 +30,9 @@ class AccessOption(StrictModel):
     price: int | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     confirmation_url: HttpUrl | None = None
+    comparison_labels: tuple[
+        Literal["recommended", "fastest", "cheapest", "fewest_transfers"], ...
+    ] = ()
     provenance: DataProvenance
 
     @model_validator(mode="after")

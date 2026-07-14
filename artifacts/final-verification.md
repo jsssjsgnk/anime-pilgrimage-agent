@@ -1,6 +1,6 @@
 # Final verification
 
-Generated: 2026-07-13T22:24:44.075162+00:00
+Generated: 2026-07-14T09:08:32.630812+00:00
 Status: **PASS**
 
 ## Commands
@@ -20,20 +20,22 @@ Status: **PASS**
 - Python coverage: at least 80% (exact value in Phase 5/all-test output).
 - RAG: Recall@6 0.929; MRR@10 0.952; Citation Precision 0.952; failed IDs disclosed in the JSON report.
 - Security: 0 secret exposures, 0 conversation-body exposures, 0 forbidden MCP tools.
-- Licenses: 114 Python and 284 Node records; 0 denied licenses.
+- Licenses: 115 Python and 284 Node records; 0 denied licenses.
 
 ## Browser evidence
 
 - `artifacts/screenshots/phase-5-desktop.png`
 - `artifacts/screenshots/phase-5-mobile.png`
-- Serialized Playwright acceptance covers request, confirmation, access/base, planning, local revision stability, evidence, and all three exports.
+- Serialized Playwright acceptance covers request, confirmation, access/base, planning, local revision stability, persistent conversational replanning/reload recovery, evidence, and all three exports.
 
 ## Known limitations
 
 - Live travel facts remain snapshots/estimates and require reconfirmation.
 - Scanned PDFs require external OCR; the MVP returns `needs_ocr`.
 - Initial official E5 model download is an operator prerequisite; subsequent smoke is offline.
-- Fixture point import replaces unauthorized scraping; this is not a deployed multi-tenant service.
+- Anitabi may expose fewer documented detail records than `/lite` advertises; Route A remains explicitly partial and does not use undocumented scraping.
+- Local modification is schema-bounded to a day and walking-reduction percentage.
+- This is a local Compose service without a production identity provider or HA setup.
 - Complete details: `docs/KNOWN_LIMITATIONS.md`.
 
 No deployment, booking, payment, purchase, or external message was performed.

@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-07-13T22:24:44.075162+00:00",
+  "generated_at": "2026-07-14T09:08:32.630812+00:00",
   "phase_status": {
     "1": "PASS",
     "2": "PASS",
@@ -21,7 +21,7 @@
   },
   "security": {
     "schema_version": "1",
-    "files_scanned": 28,
+    "files_scanned": 38,
     "local_secret_exposures": 0,
     "conversation_body_exposures": 0,
     "mcp_tool_count": 9,
@@ -29,7 +29,7 @@
     "forbidden_mcp_tools": []
   },
   "licenses": {
-    "python_package_count": 114,
+    "python_package_count": 115,
     "node_package_count": 284,
     "denied_license_count": 0
   }

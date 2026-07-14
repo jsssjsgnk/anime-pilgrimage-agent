@@ -19,6 +19,7 @@ from pilgrimage_agent.domain.models import (
     SubjectSearchQuery,
     WeatherForecastQuery,
 )
+from pilgrimage_agent.providers.anitabi import AnitabiProvider
 from pilgrimage_agent.providers.bangumi import BangumiSubjectProvider
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.http import SafeHttpClient
@@ -104,6 +105,109 @@ async def test_bangumi_contract_supports_empty_and_success(items: list[dict[str,
         await client.aclose()
     assert len(result.candidates) == len(items)
     assert all(candidate.provenance.source_url for candidate in result.candidates)
+
+
+async def test_anitabi_contract_fetches_complete_points_and_reuses_cache() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.method == "GET"
+        assert request.headers.get("user-agent") == "fixture-app/1.0"
+        if request.url.path.endswith("/lite"):
+            return json_response(
+                request,
+                {"id": 328609, "modified": 1_700_000_000_000, "pointsLength": 2},
+            )
+        return json_response(
+            request,
+            [
+                {
+                    "id": "point-a",
+                    "cn": "下北泽站口",
+                    "name": "下北沢駅前",
+                    "ep": 1,
+                    "s": 62,
+                    "geo": [35.6615, 139.6670],
+                    "origin": "Official fixture source",
+                    "originURL": "https://example.org/source-a",
+                },
+                {
+                    "id": "point-b",
+                    "name": "Shelter",
+                    "ep": "OP",
+                    "geo": [35.6618, 139.6678],
+                },
+            ],
+        )
+
+    http, client = transport_client("anitabi", handler)
+    provider = AnitabiProvider(http=http, user_agent="fixture-app/1.0")
+    query = PilgrimagePointQuery(subject_id="328609", provider="anitabi")
+    try:
+        first = await provider.fetch(query)
+        second = await provider.fetch(query)
+    finally:
+        await client.aclose()
+    assert calls == 2
+    assert first == second
+    assert first.is_complete
+    assert len(first.points) == 2
+    assert first.points[0].source_label == "Official fixture source"
+    assert str(first.points[0].provenance.source_url) == "https://example.org/source-a"
+    assert first.points[1].latitude == 35.6618
+    assert "OP" in first.points[1].episode_refs[0]
+
+
+async def test_anitabi_contract_marks_count_mismatch_and_invalid_points_partial() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/lite"):
+            return json_response(request, {"id": 328609, "pointsLength": 3})
+        return json_response(
+            request,
+            [
+                {"id": "valid", "name": "Valid", "geo": [35.66, 139.66]},
+                {"id": "invalid", "name": "Invalid", "geo": [135.66, 139.66]},
+            ],
+        )
+
+    http, client = transport_client("anitabi", handler)
+    provider = AnitabiProvider(http=http)
+    try:
+        result = await provider.fetch(
+            PilgrimagePointQuery(subject_id="328609", provider="anitabi")
+        )
+    finally:
+        await client.aclose()
+    assert not result.is_complete
+    assert len(result.points) == 1
+    assert any("screenshot-detail count" in warning for warning in result.warnings)
+    assert any("invalid Anitabi point" in warning for warning in result.warnings)
+
+
+async def test_anitabi_contract_discloses_documented_detail_subset() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/lite"):
+            return json_response(
+                request,
+                {"id": 328609, "pointsLength": 414, "imagesLength": 1},
+            )
+        return json_response(
+            request,
+            [{"id": "detailed", "name": "Detailed", "geo": [35.66, 139.66]}],
+        )
+
+    http, client = transport_client("anitabi", handler)
+    try:
+        result = await AnitabiProvider(http=http).fetch(
+            PilgrimagePointQuery(subject_id="328609", provider="anitabi")
+        )
+    finally:
+        await client.aclose()
+    assert not result.is_complete
+    assert len(result.points) == 1
+    assert any("414 total map points" in warning for warning in result.warnings)
 
 
 async def test_ors_contract_uses_longitude_latitude_and_normalizes_all_outputs() -> None:

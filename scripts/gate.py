@@ -664,7 +664,8 @@ def write_final_verification(*, overall_verified: bool) -> None:
         "- `artifacts/screenshots/phase-5-desktop.png`",
         "- `artifacts/screenshots/phase-5-mobile.png`",
         "- Serialized Playwright acceptance covers request, confirmation, access/base, "
-        "planning, local revision stability, evidence, and all three exports.",
+        "planning, local revision stability, persistent conversational replanning/reload "
+        "recovery, evidence, and all three exports.",
         "",
         "## Known limitations",
         "",
@@ -672,8 +673,10 @@ def write_final_verification(*, overall_verified: bool) -> None:
         "- Scanned PDFs require external OCR; the MVP returns `needs_ocr`.",
         "- Initial official E5 model download is an operator prerequisite; "
         "subsequent smoke is offline.",
-        "- Fixture point import replaces unauthorized scraping; "
-        "this is not a deployed multi-tenant service.",
+        "- Anitabi may expose fewer documented detail records than `/lite` advertises; "
+        "Route A remains explicitly partial and does not use undocumented scraping.",
+        "- Local modification is schema-bounded to a day and walking-reduction percentage.",
+        "- This is a local Compose service without a production identity provider or HA setup.",
         "- Complete details: `docs/KNOWN_LIMITATIONS.md`.",
         "",
         "No deployment, booking, payment, purchase, or external message was performed.",

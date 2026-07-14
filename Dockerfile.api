@@ -9,16 +9,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY --from=uv /uv /uvx /bin/
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app \
-    && mkdir -p /app/data/rag-bm25 \
+    && mkdir -p /app/data/rag-bm25 /app/data/huggingface \
     && chown -R app:app /app/data
 WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --no-editable --extra rag --no-install-project
+
 COPY src ./src
 COPY fixtures ./fixtures
 COPY alembic.ini ./
 COPY alembic ./alembic
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --frozen --no-dev --no-editable --extra rag
 
 ENV PATH="/opt/venv/bin:$PATH"
 USER app

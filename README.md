@@ -4,10 +4,11 @@ A source-aware, mixed-initiative planner that turns anime pilgrimage ideas into 
 
 ## What is implemented
 
-- Bangumi subject search with explicit confirmation and sourced Route A point import.
+- Bangumi subject search with explicit confirmation, followed by the documented Anitabi Open API with honest complete/partial Route A semantics and legal import fallback.
 - Read-only provider/MCP boundaries for catalog, points, ORS, weather, and flight snapshots.
 - Deterministic access/base selection, road-matrix planning, omissions, buffers, time zones, walking limits, and bounded Google Maps URLs.
 - A durable LangGraph workflow with three explicit interrupts, PostgreSQL checkpoints, five project-owned memory stores, structured review, and a three-revision cap.
+- Trip-scoped continuous conversation with PostgreSQL history, browser reload recovery, grounded status/plan/source explanations, and deterministic conversational replanning.
 - Hybrid RAG for Markdown/TXT/text PDFs using multilingual E5, exact pgvector cosine search, persistent bm25s, RRF, namespace filters, citations, freshness, conflicts, and prompt-injection isolation.
 - A responsive React workflow for request → subject confirmation → access/base → plan → local revision → evidence → JSON/GeoJSON/standalone HTML export.
 
@@ -18,7 +19,7 @@ flowchart LR
     WEB["React / TypeScript Web"] --> API["FastAPI / Pydantic"]
     API --> GRAPH["LangGraph workflow"]
     GRAPH --> MCP["Read-only MCP allowlist"]
-    MCP --> PROVIDERS["Bangumi · ORS · Weather · SearchAPI"]
+    MCP --> PROVIDERS["Bangumi · Anitabi · ORS · Weather · SearchAPI"]
     API --> PG["PostgreSQL 16 + pgvector"]
     GRAPH --> PG
     API --> RAG["E5 + exact vector + persistent BM25 + RRF"]
@@ -62,10 +63,11 @@ Web: `http://localhost:4173`; API: `http://localhost:8000`. MCP and PostgreSQL a
 The reproducible walkthrough is in [docs/DEMO.md](docs/DEMO.md). In brief:
 
 1. Open the Web and submit the prefilled Kyoto → Tokyo, three-day request.
-2. Explicitly confirm *Bocchi the Rock!* and inspect the three sourced Route A points.
-3. Select the early/evening train candidates, Shimokitazawa base, and 5 km walking cap.
-4. Generate Route B, inspect source/estimate labels, apply the Day 2-only 3 km revision, and verify Days 1 and 3 remain stable.
-5. Inspect the dated/authority-labelled evidence and export JSON, GeoJSON, and standalone HTML.
+2. Explicitly confirm *Bocchi the Rock!* and inspect the current 74-point Anitabi detail subset; the UI discloses that `/lite` advertises 414 total map points and does not claim unavailable details are complete.
+3. Select the manual transport candidates (or confirmed flight snapshots when IATA codes are supplied), a Route A-derived base, and the 5 km walking cap.
+4. Generate Route B, then ask the planning Agent why it made the arrangement or whether the point set is complete.
+5. In the same conversation, request “第二天少走 30%”. Verify plan version 2, Days 1 and 3 remain stable, then refresh the browser and confirm the transcript and plan version recover.
+6. Inspect the dated/authority-labelled evidence and export JSON, GeoJSON, and standalone HTML.
 
 All dates are relative to the test clock. The included content is fixed, short, project-authored fixture material; live provider checks are separate and read-only.
 
@@ -98,12 +100,13 @@ Current fixed-corpus RAG metrics are Recall@6 **0.929**, MRR@10 **0.952**, and C
 
 ## Known limitations
 
-- The included legal JSON/GeoJSON fixture contains exactly three sourced points for Bangumi subject `328609`; it is a reproducible demo corpus, not a claim that the work has only three real-world pilgrimage locations. Replace or extend `fixtures/providers/points.geojson` with permitted, sourced records to expand Route A.
+- The documented Anitabi `/points/detail` response currently exposes 74 point details for subject `328609`, while `/lite` advertises 414 map points (and currently reports `imagesLength=414`). The product returns those 74 sourced records with `is_complete=false`; it does not scrape or invent the unavailable remainder. A configurable legal JSON/GeoJSON import remains a labelled fallback.
 - The interactive MapLibre basemap uses the no-key OpenFreeMap Liberty style with OpenStreetMap data and visible attribution, so street tiles require an internet connection; the numbered markers and adjacent point list remain available if the basemap cannot load.
 - Flights, routes, weather, prices, opening/access rules, and photography rules are snapshots or estimates and must be reconfirmed before departure.
 - The MVP extracts text PDFs with pypdf but does not run OCR; scanned PDFs return `needs_ocr`.
-- The Web demonstrates one validated scenario and local Day 2 revision rather than a general natural-language patch compiler.
-- The real E5 snapshot must be downloaded once before offline verification; it is not committed to Git.
+- Local natural-language modification is intentionally schema-bounded to a selected day plus a walking-reduction percentage; it is not a general arbitrary itinerary editor.
+- Conversation keeps the latest 50 normalized messages per trip. Recognized status, source, confirmation, weather, evidence, and local-change intents use deterministic handling; configured LLM synthesis is reserved for otherwise-general questions and cannot directly mutate the plan.
+- The real multilingual E5 snapshot must be downloaded once before offline verification; the Compose image includes CPU-only PyTorch, not CUDA, and model weights are not committed to Git.
 - This is a local portfolio implementation, not a deployed or multi-tenant production service.
 
 See [the complete limitations](docs/KNOWN_LIMITATIONS.md), [data/safety policy](docs/06_DATA_SAFETY.md), and [resume/interview notes](docs/RESUME_BULLETS.md).

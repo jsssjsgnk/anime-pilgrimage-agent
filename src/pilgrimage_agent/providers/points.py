@@ -6,7 +6,7 @@ import json
 import unicodedata
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import TypeAdapter, ValidationError
@@ -23,6 +23,10 @@ from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.common import provenance
 
 _DICT = TypeAdapter(dict[str, Any])
+
+
+class PilgrimagePointProvider(Protocol):
+    async def fetch(self, query: PilgrimagePointQuery) -> PilgrimagePointResult: ...
 
 
 class ImportedPilgrimagePointProvider:
@@ -158,12 +162,46 @@ class FixturePilgrimagePointProvider(ImportedPilgrimagePointProvider):
         )
 
 
+class FallbackPilgrimagePointProvider:
+    """Use a legal import only when the primary read-only point Provider fails."""
+
+    provider = "anitabi-with-import-fallback"
+
+    def __init__(
+        self,
+        primary: PilgrimagePointProvider,
+        fallback: ImportedPilgrimagePointProvider,
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    async def fetch(self, query: PilgrimagePointQuery) -> PilgrimagePointResult:
+        try:
+            return await self.primary.fetch(query)
+        except ProviderError as error:
+            if error.kind is ProviderErrorKind.VALIDATION:
+                raise
+            imported = await self.fallback.fetch(
+                query.model_copy(update={"provider": "imported"})
+            )
+            return imported.model_copy(
+                update={
+                    "is_complete": False,
+                    "warnings": (
+                        f"Anitabi {error.kind.value}; used configured legal import fallback.",
+                        *imported.warnings,
+                    ),
+                }
+            )
+
+
 def build_route_a(result: PilgrimagePointResult, *, subject_id: str) -> RouteA:
     """Clean and deduplicate sourced points without deleting unique valid candidates."""
 
     seen: set[tuple[str, float, float]] = set()
     points: list[PilgrimagePoint] = []
     warnings = list(result.warnings)
+    original_warning_count = len(warnings)
     for point in result.points:
         if point.subject_id != subject_id:
             warnings.append(f"Excluded point {point.id}: subject mismatch.")
@@ -181,7 +219,7 @@ def build_route_a(result: PilgrimagePointResult, *, subject_id: str) -> RouteA:
     return RouteA(
         subject_id=subject_id,
         points=tuple(points),
-        is_complete=result.is_complete,
+        is_complete=result.is_complete and len(warnings) == original_warning_count,
         warnings=tuple(warnings),
     )
 

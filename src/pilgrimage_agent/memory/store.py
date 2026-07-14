@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 from uuid import UUID, uuid4
 
@@ -101,6 +102,7 @@ class InMemoryProjectStore:
             owner_user_id=owner_user_id,
             event_type=event_type,
             payload=payload,
+            created_at=datetime.now(UTC),
         )
         self.events[trip_id].append(event)
         return event
@@ -210,12 +212,14 @@ class SqlProjectStore:
             )
             session.add(record)
             await session.flush()
+            await session.refresh(record, attribute_names=["created_at"])
             return StoredEvent(
                 event_id=record.id,
                 trip_id=trip_id,
                 owner_user_id=owner_user_id,
                 event_type=event_type,
                 payload=payload,
+                created_at=record.created_at,
             )
 
     async def list_events(self, owner_user_id: str, trip_id: UUID) -> Sequence[StoredEvent]:
@@ -237,6 +241,7 @@ class SqlProjectStore:
                 owner_user_id=record.owner_user_id,
                 event_type=record.event_type,
                 payload=record.payload,
+                created_at=record.created_at,
             )
             for record in records
         )

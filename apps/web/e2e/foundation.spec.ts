@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { captureEvidence } from "./screenshot-evidence";
+import { provideDeterministicRequirements } from "./workflow-fixture";
 
 test("foundation shell is responsive and captures a request", async ({ page }, testInfo) => {
+  await provideDeterministicRequirements(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /真正走得完的旅程/ })).toBeVisible();
   await expect(page.getByText("只读规划 · 不预订 · 不付款")).toBeVisible();
@@ -10,9 +13,5 @@ test("foundation shell is responsive and captures a request", async ({ page }, t
   const screenshotName = testInfo.project.name.startsWith("mobile")
     ? "phase-1-mobile.png"
     : "phase-1-desktop.png";
-  await page.screenshot({
-    path: `../../artifacts/screenshots/${screenshotName}`,
-    fullPage: true,
-  });
+  await captureEvidence(page, testInfo, screenshotName);
 });
-

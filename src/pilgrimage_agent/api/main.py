@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal, cast
@@ -13,14 +14,39 @@ from fastapi.responses import JSONResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command, Interrupt
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from pilgrimage_agent import __version__
+from pilgrimage_agent.agent.conversation import (
+    ConversationResponder,
+    DeterministicConversationAgent,
+    LlmConversationAgent,
+    ResilientConversationAgent,
+    context_from_workflow,
+)
 from pilgrimage_agent.agent.graph import WorkflowGraph, WorkflowState, build_workflow
+from pilgrimage_agent.agent.knowledge import SqlKnowledgeRetriever
+from pilgrimage_agent.agent.llm import (
+    JsonChatClient,
+    LlmRequirementExtractor,
+    LlmReviewer,
+    ResilientRequirementExtractor,
+    ResilientReviewer,
+)
+from pilgrimage_agent.agent.mcp_client import LangChainMcpToolClient
+from pilgrimage_agent.agent.review import FixtureReviewer
 from pilgrimage_agent.agent.schemas import (
     ConfirmationRequest,
+    ConversationAction,
+    ConversationEventPayload,
+    ConversationIntent,
+    ConversationMessage,
+    ConversationRequest,
+    ConversationResponse,
+    ModifyWorkflowRequest,
+    PlanModification,
     ResumeWorkflowRequest,
     StartWorkflowRequest,
     WorkflowResponse,
@@ -32,17 +58,33 @@ from pilgrimage_agent.domain.models import (
     ConfirmedSubject,
     PilgrimagePointQuery,
     RouteA,
+    SubjectCandidate,
     SubjectSearchQuery,
     SubjectSearchResult,
+    TripRequest,
+    WeatherForecastResult,
 )
-from pilgrimage_agent.domain.planning import PlanningOptions, RouteBPlan, RouteBRequest
-from pilgrimage_agent.memory.schemas import StoredTrip
+from pilgrimage_agent.domain.planning import (
+    PlanningOptions,
+    RouteBPlan,
+    RouteBRequest,
+    ValidationIssue,
+)
+from pilgrimage_agent.memory.schemas import StoredEvent, StoredPreference, StoredTrip
 from pilgrimage_agent.memory.store import SqlProjectStore
 from pilgrimage_agent.planning.demo import fixture_route_a, plan_demo_route_b, planning_options
+from pilgrimage_agent.planning.modification import (
+    parse_local_modification,
+    replan_local_walking,
+)
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.points import build_route_a
 from pilgrimage_agent.providers.service import get_provider_services
-from pilgrimage_agent.rag.embedding import FixtureE5Embedder
+from pilgrimage_agent.rag.embedding import (
+    EmbeddingProvider,
+    FixtureE5Embedder,
+    LazySentenceTransformerE5Embedder,
+)
 from pilgrimage_agent.rag.evaluation import evaluate
 from pilgrimage_agent.rag.fixtures import load_fixture_index
 from pilgrimage_agent.rag.ingestion import ingest_document
@@ -73,12 +115,28 @@ class CapabilityResponse(BaseModel):
     capabilities: dict[str, bool]
 
 
+class PreferenceWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner_user_id: str = Field(min_length=1, max_length=120)
+    value: object
+    explicit_consent: Literal[True]
+
+
+class PreferenceDeleteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deleted_count: int = Field(ge=0)
+
+
 app = FastAPI(
     title="Anime Pilgrimage Agent API",
     version=__version__,
     description="Read-only planning API; booking and payment are intentionally unsupported.",
 )
 RAG_FIXTURE_ROOT = Path.cwd() / "fixtures" / "rag"
+CONVERSATION_EVENT = "conversation_message"
+CONVERSATION_LIMIT = 50
 
 
 def _evaluate_fixture_knowledge() -> RagEvaluationReport:
@@ -101,18 +159,55 @@ def _checkpoint_thread(owner_user_id: str, thread_id: str, trip_id: UUID) -> str
     return sha256(namespace.encode()).hexdigest()
 
 
+@lru_cache
+def _rag_embedder() -> EmbeddingProvider:
+    if get_settings().rag_embedding_mode == "real":
+        return LazySentenceTransformerE5Embedder()
+    return FixtureE5Embedder()
+
+
 @asynccontextmanager
 async def _workflow_runtime() -> AsyncIterator[tuple[WorkflowGraph, SqlProjectStore]]:
     """Open bounded checkpoint/store resources for one HTTP operation."""
 
-    database_url = get_settings().database_url.get_secret_value()
+    settings = get_settings()
+    database_url = settings.database_url.get_secret_value()
     engine = create_async_engine(database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
+    rag_repository = SqlRagRepository(
+        sessions, _rag_embedder(), bm25_root=settings.rag_bm25_index_dir
+    )
+    chat_client: JsonChatClient | None = None
+    requirement_extractor = None
+    reviewer = None
+    if settings.llm_api_key and settings.llm_base_url and settings.llm_model:
+        chat_client = JsonChatClient(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.llm_api_key.get_secret_value(),
+            timeout_seconds=settings.provider_timeout_seconds,
+            max_attempts=settings.provider_max_attempts,
+        )
+        requirement_extractor = ResilientRequirementExtractor(
+            LlmRequirementExtractor(chat_client)
+        )
+        reviewer = ResilientReviewer(LlmReviewer(chat_client), FixtureReviewer())
     try:
         async with AsyncPostgresSaver.from_conn_string(_checkpoint_url()) as checkpointer:
             await checkpointer.setup()
-            yield build_workflow(checkpointer), SqlProjectStore(sessions)
+            yield build_workflow(
+                checkpointer,
+                tool_client=LangChainMcpToolClient(
+                    url=settings.mcp_tools_url,
+                    timeout_seconds=settings.provider_timeout_seconds,
+                ),
+                requirement_extractor=requirement_extractor,
+                reviewer=reviewer,
+                knowledge_retriever=SqlKnowledgeRetriever(rag_repository),
+            ), SqlProjectStore(sessions)
     finally:
+        if chat_client is not None:
+            await chat_client.close()
         await engine.dispose()
 
 
@@ -124,9 +219,50 @@ async def _knowledge_repository() -> AsyncIterator[SqlRagRepository]:
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     try:
         yield SqlRagRepository(
-            sessions, FixtureE5Embedder(), bm25_root=settings.rag_bm25_index_dir
+            sessions, _rag_embedder(), bm25_root=settings.rag_bm25_index_dir
         )
     finally:
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def _project_store() -> AsyncIterator[SqlProjectStore]:
+    engine = create_async_engine(
+        get_settings().database_url.get_secret_value(), pool_pre_ping=True
+    )
+    try:
+        yield SqlProjectStore(async_sessionmaker(engine, expire_on_commit=False))
+    finally:
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def _conversation_runtime(
+) -> AsyncIterator[tuple[ConversationResponder, SqlProjectStore]]:
+    """Open one bounded conversation operation with an optional structured LLM."""
+
+    settings = get_settings()
+    engine = create_async_engine(
+        settings.database_url.get_secret_value(), pool_pre_ping=True
+    )
+    client: JsonChatClient | None = None
+    responder: ConversationResponder = DeterministicConversationAgent()
+    if settings.llm_api_key and settings.llm_base_url and settings.llm_model:
+        client = JsonChatClient(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.llm_api_key.get_secret_value(),
+            timeout_seconds=settings.provider_timeout_seconds,
+            max_attempts=settings.provider_max_attempts,
+        )
+        responder = ResilientConversationAgent(LlmConversationAgent(client))
+    try:
+        yield responder, SqlProjectStore(
+            async_sessionmaker(engine, expire_on_commit=False)
+        )
+    finally:
+        if client is not None:
+            await client.close()
         await engine.dispose()
 
 
@@ -150,6 +286,53 @@ def _workflow_response(result: WorkflowState) -> WorkflowResponse:
         revision_count=result.get("revision_count", 0),
         warnings=result.get("warnings", ()),
         plan_day_hashes=result.get("plan_day_hashes", ()),
+        requirements=(
+            TripRequest.model_validate(result["requirements"])
+            if "requirements" in result
+            else None
+        ),
+        requirement_source=cast(
+            Literal["provided", "llm", "deterministic_fallback"] | None,
+            result.get("requirement_source"),
+        ),
+        requirement_assumptions=result.get("requirement_assumptions", ()),
+        effective_walking_limit=result.get("effective_walking_limit"),
+        applied_preference_keys=result.get("applied_preference_keys", ()),
+        subject_candidates=tuple(
+            SubjectCandidate.model_validate(item)
+            for item in result.get("subject_candidates", ())
+        ),
+        confirmed_subject=(
+            ConfirmedSubject.model_validate(result["confirmed_subject"])
+            if "confirmed_subject" in result
+            else None
+        ),
+        route_a=(
+            RouteA.model_validate(result["route_a"]) if "route_a" in result else None
+        ),
+        planning_options=(
+            PlanningOptions.model_validate(result["planning_options"])
+            if "planning_options" in result
+            else None
+        ),
+        route_b=(
+            RouteBPlan.model_validate(result["route_b"]) if "route_b" in result else None
+        ),
+        weather=(
+            WeatherForecastResult.model_validate(result["weather"])
+            if "weather" in result
+            else None
+        ),
+        knowledge=(
+            KnowledgeSearchResult.model_validate(result["knowledge"])
+            if "knowledge" in result
+            else None
+        ),
+        validation_issues=tuple(
+            ValidationIssue.model_validate(item)
+            for item in result.get("validation_issues", ())
+        ),
+        reviewer_explanation=result.get("reviewer_explanation"),
     )
 
 
@@ -169,6 +352,83 @@ async def _save_workflow(
         response.trip_id,
         "workflow_transition",
         {"phase": response.phase, "status": response.status.value},
+    )
+
+
+def _conversation_message(event: StoredEvent) -> ConversationMessage | None:
+    """Validate a persisted chat event without trusting arbitrary historical JSON."""
+
+    if event.event_type != CONVERSATION_EVENT:
+        return None
+    try:
+        payload = ConversationEventPayload.model_validate(event.payload)
+    except ValidationError:
+        return None
+    return ConversationMessage(
+        message_id=event.event_id,
+        created_at=event.created_at,
+        **payload.model_dump(mode="python"),
+    )
+
+
+async def _list_conversation_messages(
+    store: SqlProjectStore, owner_user_id: str, trip_id: UUID
+) -> tuple[ConversationMessage, ...]:
+    messages = tuple(
+        message
+        for event in await store.list_events(owner_user_id, trip_id)
+        if (message := _conversation_message(event)) is not None
+    )
+    return messages[-CONVERSATION_LIMIT:]
+
+
+async def _append_conversation_message(
+    store: SqlProjectStore,
+    owner_user_id: str,
+    trip_id: UUID,
+    payload: ConversationEventPayload,
+) -> ConversationMessage:
+    event = await store.append_event(
+        owner_user_id,
+        trip_id,
+        CONVERSATION_EVENT,
+        payload.model_dump(mode="json"),
+    )
+    message = _conversation_message(event)
+    if message is None:  # pragma: no cover - store contract violation
+        raise RuntimeError("Conversation event failed strict validation")
+    return message
+
+
+def _modified_workflow(
+    current: WorkflowResponse, modification: PlanModification
+) -> WorkflowResponse:
+    if current.route_a is None or current.route_b is None:
+        raise ValueError("Workflow has no editable itinerary")
+    if current.revision_count >= 3:
+        raise ValueError("The three-revision limit was reached")
+    plan, warnings = replan_local_walking(
+        current.route_b, current.route_a, modification
+    )
+    revision = current.revision_count + 1
+    hashes = list(current.plan_day_hashes)
+    while len(hashes) < len(plan.days):
+        hashes.append("")
+    changed_index = modification.target_day - 1
+    hashes[changed_index] = sha256(
+        f"{plan.days[changed_index].model_dump_json()}|revision={revision}".encode()
+    ).hexdigest()[:16]
+    return current.model_copy(
+        update={
+            "route_b": plan,
+            "revision_count": revision,
+            "plan_day_hashes": tuple(hashes),
+            "warnings": (*current.warnings, *warnings),
+            "reviewer_explanation": (
+                f"Applied Day {modification.target_day} walking reduction of "
+                f"{modification.walking_reduction_percent}% without changing other days."
+            ),
+        }
     )
 
 
@@ -240,7 +500,10 @@ async def confirm_subject(subject_id: str) -> ConfirmedSubject:
 async def route_a(subject_id: str) -> RouteA:
     services = get_provider_services()
     result = await services.points.fetch(
-        PilgrimagePointQuery(subject_id=subject_id, provider="fixture")
+        PilgrimagePointQuery(
+            subject_id=subject_id,
+            provider=get_settings().pilgrimage_point_mode,
+        )
     )
     return build_route_a(result, subject_id=subject_id)
 
@@ -271,11 +534,97 @@ async def start_workflow(request: StartWorkflowRequest) -> WorkflowResponse:
         "trip_id": str(request.trip_id),
         "request_summary": request.request_summary,
     }
+    if request.requirements is not None:
+        initial["requirements"] = cast(
+            dict[str, object], request.requirements.model_dump(mode="json")
+        )
     async with _workflow_runtime() as (graph, store):
+        if request.apply_saved_preferences:
+            preferences = await store.list_preferences(request.owner_user_id)
+            allowed = {
+                "budget_level",
+                "walking_preference",
+                "max_walking_meters_per_day",
+            }
+            initial["preference_defaults"] = {
+                item.preference_key: item.value.get("value")
+                for item in preferences
+                if item.preference_key in allowed and "value" in item.value
+            }
         result = cast(WorkflowState, await graph.ainvoke(initial, config))
         response = _workflow_response(result)
         await _save_workflow(store, request.owner_user_id, response)
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            response.trip_id,
+            ConversationEventPayload(
+                role="user",
+                content=request.request_summary,
+                intent=ConversationIntent.TRIP_STARTED,
+            ),
+        )
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            response.trip_id,
+            ConversationEventPayload(
+                role="assistant",
+                content=(
+                    "我已建立这次行程的持续对话。当前事实、确认进度和后续修改都会"
+                    "绑定在这个行程中; 关键选择仍需要你在可见卡片中明确确认。"
+                ),
+                intent=ConversationIntent.TRIP_STARTED,
+                action=ConversationAction(
+                    kind=(
+                        "confirmation_required"
+                        if response.pending_confirmation is not None
+                        else "none"
+                    )
+                ),
+            ),
+        )
     return response
+
+
+@app.get("/api/preferences", response_model=tuple[StoredPreference, ...])
+async def list_preferences(
+    owner_user_id: str = Query(min_length=1, max_length=120),
+) -> tuple[StoredPreference, ...]:
+    async with _project_store() as store:
+        return tuple(await store.list_preferences(owner_user_id))
+
+
+@app.put("/api/preferences/{preference_key}", response_model=StoredPreference)
+async def save_preference(
+    preference_key: Literal[
+        "budget_level",
+        "walking_preference",
+        "max_walking_meters_per_day",
+    ],
+    request: PreferenceWriteRequest,
+) -> StoredPreference:
+    normalized = getattr(
+        TripRequest.model_validate({preference_key: request.value}), preference_key
+    )
+    preference = StoredPreference(
+        owner_user_id=request.owner_user_id,
+        preference_key=preference_key,
+        value={"value": normalized},
+        explicit_consent=request.explicit_consent,
+    )
+    async with _project_store() as store:
+        await store.save_preference(preference)
+    return preference
+
+
+@app.delete("/api/preferences", response_model=PreferenceDeleteResponse)
+async def delete_preferences(
+    owner_user_id: str = Query(min_length=1, max_length=120),
+) -> PreferenceDeleteResponse:
+    async with _project_store() as store:
+        deleted = await store.delete_preferences(owner_user_id)
+    return PreferenceDeleteResponse(deleted_count=deleted)
 
 
 @app.post("/api/workflows/{trip_id}/resume", response_model=WorkflowResponse)
@@ -311,9 +660,143 @@ async def get_workflow(
     return WorkflowResponse.model_validate(trip.state)
 
 
+@app.get(
+    "/api/workflows/{trip_id}/messages",
+    response_model=tuple[ConversationMessage, ...],
+)
+async def list_workflow_messages(
+    trip_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    thread_id: str = Query(min_length=1, max_length=120),
+) -> tuple[ConversationMessage, ...]:
+    async with _project_store() as store:
+        trip = await store.get_trip(owner_user_id, thread_id, trip_id)
+        if trip is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Workflow was not found in this namespace",
+            )
+        return await _list_conversation_messages(store, owner_user_id, trip_id)
+
+
+@app.post(
+    "/api/workflows/{trip_id}/messages",
+    response_model=ConversationResponse,
+)
+async def converse_workflow(
+    trip_id: UUID, request: ConversationRequest
+) -> ConversationResponse:
+    async with _conversation_runtime() as (responder, store):
+        trip = await store.get_trip(request.owner_user_id, request.thread_id, trip_id)
+        if trip is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Workflow was not found in this namespace",
+            )
+        current = WorkflowResponse.model_validate(trip.state)
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            trip_id,
+            ConversationEventPayload(
+                role="user",
+                content=request.message,
+                intent=ConversationIntent.GENERAL,
+            ),
+        )
+        messages = await _list_conversation_messages(
+            store, request.owner_user_id, trip_id
+        )
+        decision = await responder.respond(
+            context_from_workflow(current), messages[:-1][-8:], request.message
+        )
+        workflow = current
+        content = decision.answer
+        action = ConversationAction()
+        intent = decision.intent
+        if decision.modification is not None:
+            try:
+                workflow = _modified_workflow(current, decision.modification)
+            except ValueError as error:
+                intent = ConversationIntent.UNSUPPORTED_CHANGE
+                action = ConversationAction(kind="unsupported_change")
+                if "three-revision" in str(error):
+                    content = "这次行程已达到三轮局部修订上限; 我没有继续改动计划。"
+                elif "editable itinerary" in str(error):
+                    content = (
+                        "当前还没有可修改的 Route B。完成必要确认并生成计划后, "
+                        "我才能执行局部重规划。"
+                    )
+                else:
+                    content = f"这项修改无法安全执行: {error}。当前计划保持不变。"
+            else:
+                await _save_workflow(store, request.owner_user_id, workflow)
+                action = ConversationAction(
+                    kind="workflow_modified",
+                    target_day=decision.modification.target_day,
+                    revision_count=workflow.revision_count,
+                )
+                content = (
+                    f"{decision.answer} 已应用为计划版本 {workflow.revision_count + 1}; "
+                    "请复核变化后的步行距离和遗漏点。"
+                )[:2000]
+        elif decision.intent in {
+            ConversationIntent.CONFIRMATION_HELP,
+            ConversationIntent.UNSUPPORTED_CHANGE,
+        }:
+            action = ConversationAction(
+                kind=(
+                    "confirmation_required"
+                    if decision.intent is ConversationIntent.CONFIRMATION_HELP
+                    else "unsupported_change"
+                )
+            )
+        assistant = await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            trip_id,
+            ConversationEventPayload(
+                role="assistant",
+                content=content,
+                intent=intent,
+                action=action,
+            ),
+        )
+        messages = await _list_conversation_messages(
+            store, request.owner_user_id, trip_id
+        )
+        return ConversationResponse(
+            trip_id=trip_id,
+            messages=messages,
+            assistant_message=assistant,
+            workflow=workflow,
+        )
+
+
+@app.post("/api/workflows/{trip_id}/modify", response_model=WorkflowResponse)
+async def modify_workflow(
+    trip_id: UUID, request: ModifyWorkflowRequest
+) -> WorkflowResponse:
+    async with _project_store() as store:
+        trip = await store.get_trip(request.owner_user_id, request.thread_id, trip_id)
+        if trip is None:
+            raise HTTPException(
+                status_code=404, detail="Workflow was not found in this namespace"
+            )
+        current = WorkflowResponse.model_validate(trip.state)
+        try:
+            modification = parse_local_modification(request.instruction)
+            response = _modified_workflow(current, modification)
+        except ValueError as error:
+            status = 409 if "Workflow" in str(error) or "revision" in str(error) else 422
+            raise HTTPException(status_code=status, detail=str(error)) from error
+        await _save_workflow(store, request.owner_user_id, response)
+    return response
+
+
 @app.post("/api/knowledge/documents", response_model=IngestedDocument)
 async def create_knowledge_document(request: KnowledgeDocumentInput) -> IngestedDocument:
-    ingested = ingest_document(request, FixtureE5Embedder())
+    ingested = ingest_document(request, _rag_embedder())
     async with _knowledge_repository() as repository:
         return await repository.save(ingested)
 

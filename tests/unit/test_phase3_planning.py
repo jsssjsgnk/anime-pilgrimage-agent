@@ -24,8 +24,12 @@ from pilgrimage_agent.domain.planning import (
     AccessMode,
     AccessOption,
     BaseCandidate,
+    DayPlan,
     OmissionCode,
     PlanningConstraints,
+    RouteBPlan,
+    ScheduledVisit,
+    VisitWindow,
 )
 from pilgrimage_agent.planning.access import select_access_options
 from pilgrimage_agent.planning.geo import (
@@ -248,3 +252,137 @@ def test_base_clustering_and_access_selection_are_deterministic() -> None:
             outbound_options=(outbound,),
             max_total_price=15_000,
         )
+
+
+def test_planner_rejects_invalid_inputs_and_keeps_empty_days() -> None:
+    chosen_base = base()
+    other_base = chosen_base.model_copy(update={"base_id": "z-base", "name": "Z Base"})
+    with pytest.raises(ValueError, match="base candidate"):
+        choose_base((), ())
+    assert choose_base((other_base, chosen_base), ()).base_id == "base"
+    with pytest.raises(ValueError, match="day_count"):
+        cluster_points((), 0)
+
+    empty_route = RouteA(subject_id="subject", points=(), is_complete=True)
+    empty_plan = build_route_b(
+        route_a=empty_route,
+        base=chosen_base,
+        matrix=haversine_matrix((chosen_base.coordinate,)),
+        constraints=constraints(date(2030, 1, 1)),
+    )
+    assert all(not day.visits and day.walking_distance_meters == 0 for day in empty_plan.days)
+
+    with pytest.raises(ValueError, match="base followed by every Route A point"):
+        build_route_b(
+            route_a=RouteA(
+                subject_id="subject",
+                points=(point(1, 35.661, 139.661),),
+                is_complete=True,
+            ),
+            base=chosen_base,
+            matrix=haversine_matrix((chosen_base.coordinate,)),
+            constraints=constraints(date(2030, 1, 1)),
+        )
+
+
+def test_unavailable_matrix_and_visit_window_receive_explicit_omissions() -> None:
+    chosen_base = base()
+    item = point(1, 35.661, 139.661)
+    route_a = RouteA(subject_id="subject", points=(item,), is_complete=True)
+    unavailable = RouteMatrix(
+        distances_meters=((0, None), (None, 0)),
+        durations_seconds=((0, None), (None, 0)),
+        provenance=prov("haversine"),
+    )
+    invalid_plan = build_route_b(
+        route_a=route_a,
+        base=chosen_base,
+        matrix=unavailable,
+        constraints=constraints(date(2030, 1, 1)),
+    )
+    assert invalid_plan.omitted_reasons[item.id].code is OmissionCode.INVALID_MATRIX
+
+    usable_matrix = haversine_matrix(
+        (
+            chosen_base.coordinate,
+            GeoCoordinate(latitude=item.latitude, longitude=item.longitude),
+        )
+    )
+    scheduled_plan = build_route_b(
+        route_a=route_a,
+        base=chosen_base,
+        matrix=usable_matrix,
+        constraints=constraints(date(2030, 1, 1)),
+    )
+    assert scheduled_plan.days[0].visits[0].point_id == item.id
+    assert scheduled_plan.days[0].maps_urls
+
+    start = date(2030, 1, 1)
+    constrained = constraints(start).model_copy(
+        update={
+            "visit_windows": (
+                VisitWindow(point_id=item.id, opens_at=time(17, 50), closes_at=time(18)),
+            )
+        }
+    )
+    window_plan = build_route_b(
+        route_a=route_a,
+        base=chosen_base,
+        matrix=usable_matrix,
+        constraints=constrained,
+    )
+    assert window_plan.omitted_reasons[item.id].code is OmissionCode.TIME_WINDOW
+
+
+def test_arrival_window_and_validator_report_all_constraint_violations() -> None:
+    start = date(2030, 1, 1)
+    timezone = ZoneInfo("Asia/Tokyo")
+    item = point(1, 35.70, 139.71)
+    chosen_base = base()
+    late_constraints = constraints(start, days=2, max_walk=100).model_copy(
+        update={"arrival_at": datetime.combine(start, time(17, 30), timezone)}
+    )
+    plan = build_route_b(
+        route_a=RouteA(subject_id="subject", points=(item,), is_complete=True),
+        base=chosen_base,
+        matrix=haversine_matrix(
+            (
+                chosen_base.coordinate,
+                GeoCoordinate(latitude=item.latitude, longitude=item.longitude),
+            )
+        ),
+        constraints=late_constraints,
+    )
+    assert plan.omitted_reasons[item.id].code is OmissionCode.WALKING_LIMIT
+    assert "daily visit window" in plan.omitted_reasons[item.id].detail
+
+    visit = ScheduledVisit(
+        point_id=item.id,
+        start_at=datetime.combine(start, time(8, 50), timezone),
+        end_at=datetime.combine(start, time(18, 10), timezone),
+        incoming_distance_meters=9_001,
+        incoming_duration_seconds=60,
+    )
+    invalid_day = DayPlan(
+        date=start,
+        window_start=datetime.combine(start, time(9), timezone),
+        window_end=datetime.combine(start, time(18), timezone),
+        visits=(visit,),
+        walking_distance_meters=9_001,
+    )
+    invalid_plan = RouteBPlan(
+        route_a_point_ids=frozenset({item.id}),
+        base=chosen_base,
+        days=(invalid_day,),
+        omitted_reasons={},
+        matrix_status="road",
+    )
+    report = validate_route_b(
+        invalid_plan,
+        constraints(start, days=1, max_walk=8_000, excluded=frozenset({item.id})),
+    )
+    assert {issue.code for issue in report.issues} == {
+        "scheduled_excluded",
+        "time_window",
+        "walking_limit",
+    }

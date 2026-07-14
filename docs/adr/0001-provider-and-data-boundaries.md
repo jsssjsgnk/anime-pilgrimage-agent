@@ -8,9 +8,9 @@ Travel planning mixes stable identifiers, live estimates, community point data, 
 
 ## Decision
 
-Use strict provider protocols for Bangumi, imported pilgrimage points, ORS, Open-Meteo, and SearchAPI. Every provider has a real and fixture implementation, bounded timeouts/retries, normalized errors, provenance, and cache policy. Route A accepts only sourced, coordinate-valid, deduplicated points. RAG is limited to unstructured guidance and may not override IDs, coordinates, prices, weather, matrices, or deterministic constraints.
+Use strict provider protocols for Bangumi, the documented Anitabi Open API, legal imported pilgrimage points, ORS, Open-Meteo, and SearchAPI. External providers have real and fixture implementations, bounded timeouts/retries, normalized errors, provenance, and cache policy. Route A accepts only sourced, coordinate-valid, deduplicated points and compares Anitabi detail counts with `/lite` before declaring completeness. RAG is limited to unstructured guidance and may not override IDs, coordinates, prices, weather, matrices, or deterministic constraints.
 
-MCP exposes only the nine read-only normalized provider operations. Anitabi scraping, booking/payment, arbitrary URLs, shell/filesystem access, and raw database queries are outside the runtime boundary.
+MCP exposes only the nine read-only normalized provider operations. Undocumented Anitabi scraping, booking/payment, arbitrary URLs, shell/filesystem access, and raw database queries are outside the runtime boundary.
 
 ## Consequences
 

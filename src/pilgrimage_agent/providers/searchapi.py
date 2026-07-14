@@ -178,7 +178,9 @@ class SearchApiFlightProvider:
             },
             sort_keys=True,
         )
-        duration = item.get("total_duration", item.get("duration", 0))
+        duration = int(
+            (segments[-1].arrival_at - segments[0].departure_at).total_seconds() // 60
+        )
         return FlightOption(
             option_id=hashlib.sha256(stable.encode()).hexdigest()[:20],
             price=item["price"],

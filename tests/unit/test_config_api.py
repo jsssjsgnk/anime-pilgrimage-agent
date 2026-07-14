@@ -19,6 +19,7 @@ def test_capabilities_expose_presence_only() -> None:
     assert settings.capability_status() == {
         "llm": True,
         "bangumi": False,
+        "anitabi": True,
         "ors": False,
         "searchapi": False,
         "weather": True,
@@ -43,4 +44,3 @@ def test_capability_endpoint_never_returns_values() -> None:
     payload = response.json()
     assert set(payload) == {"capabilities"}
     assert all(isinstance(value, bool) for value in payload["capabilities"].values())
-

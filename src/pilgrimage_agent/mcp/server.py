@@ -52,9 +52,9 @@ async def get_anime_subject(subject_id: str) -> dict[str, object]:
 @mcp.tool()
 async def fetch_pilgrimage_points(
     subject_id: str,
-    provider: Literal["imported", "fixture"] = "imported",
+    provider: Literal["anitabi", "imported", "fixture"] = "anitabi",
 ) -> dict[str, object]:
-    """Fetch sourced pilgrimage points from the configured legal import or fixture."""
+    """Fetch complete documented Anitabi points, with legal import as explicit fallback."""
 
     result = await get_provider_services().points.fetch(
         PilgrimagePointQuery(subject_id=subject_id, provider=provider)

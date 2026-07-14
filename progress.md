@@ -1,6 +1,59 @@
 # Progress Log
 
+## 2026-07-14 — CPU-only E5 container remediation
+- Confirmed the apparent Compose hang was a completed BuildKit job, not an application deadlock: the API image reached 16.9 GB after `uv sync --extra rag` selected CUDA-enabled PyTorch and multiple NVIDIA runtime wheels, then spent several minutes exporting/unpacking layers.
+- Added the official uv explicit `pytorch-cpu` index/source mapping to `pyproject.toml`; the lock still needs regeneration through the authorized Conda environment because no repository-local `uv.exe` exists.
+- Error: the first lock attempt tried a missing `.venv\\Scripts\\uv.exe`; do not repeat that path. Use `conda run -n anime-pilgrimage-agent uv lock` with the repository-local TEMP/TMP workaround.
+- The first successful Conda lock still left transitive `torch` on PyPI because uv source overrides apply to declared project dependencies. Added `torch>=2,<3` explicitly to the `rag` extra so the CPU index binding becomes authoritative on the next lock.
+- Regenerated `uv.lock`: the CPU index is now authoritative and all CUDA/NVIDIA/Triton packages were removed. The rebuilt API image completed once in 1m44s and shrank from 16.9 GB to 3.84 GB.
+- Recreated the API container from the CPU image. Improved `scripts/wait_compose.py` to print immediate status changes and a flushed heartbeat every 10 seconds, so legitimate startup waits no longer look frozen.
+- Post-rebuild regression passed: Ruff, mypy, 70 Python tests, 3 Web tests, and 80.14% aggregate branch coverage. The remaining explicit coverage gap is the planner/Domain Validator module at 83%; added boundary tests for empty input, matrix failures, visit/arrival windows, and validator violations.
+- First focused planner run reached 88.35%, short of the 90% module target, and Ruff found import ordering. Corrected the import and added a successful scheduling/maps path to cover the main planner branch before rechecking.
+- Second focused planner run passed 8/8 and reached 97.57% branch coverage; Ruff also passed.
+- The mandatory in-app Browser skill was read and attempted for live visual QA. Runtime initialization failed with `Cannot redefine property: process`; after a documented fresh-kernel recovery attempt it failed identically, with no browser binding available to read troubleshooting docs. Stopped repeating the plugin failure and switched to the repository's Playwright desktop/mobile acceptance path.
+- First integrated Playwright run: foundation passed on desktop/mobile, but all six workflow scenarios timed out after the first action. API logs identified one shared root cause: the configured OpenAI-compatible provider returned valid standard metadata (`role`, `index`, `finish_reason`, `usage`, provider reasoning) that the overly narrow response envelope rejected, causing HTTP 500.
+- Updated the explicit Pydantic response envelope to validate required fields while ignoring legitimate provider metadata. Added resilient, disclosed deterministic extraction/reviewer fallbacks so malformed LLM output degrades safely instead of taking down the workflow.
+- Focused LLM/graph regressions passed 11/11. Ruff then found only import ordering in the API module; corrected it before rebuilding the container.
+- Rebuilt/recreated the API with the LLM fix; health replacement succeeded. The build showed source changes invalidated the entire dependency layer, so split Docker installation into a cached `--no-install-project` dependency layer followed by the small project install layer for subsequent rebuilds.
+- Focused desktop Phase 2 advanced past requirements but ended at `subject_not_found`; API returned 200 for both start/resume, so the response-envelope crash is fixed. A PowerShell diagnostic request suffered host encoding corruption and therefore is not valid evidence for the browser's UTF-8 Bangumi query; inspect the retained Playwright response trace instead.
+- Error: piping an inline Python diagnostic through `conda run ... python -` opened an interactive prompt because that wrapper did not forward stdin. Do not repeat; use trace parsing or an on-disk tested script.
+- Parsed only the retained trace's safe workflow response bodies: UTF-8 was correct, LLM extraction found Kyoto/Tokyo/Bocchi but left start/end null for “September, three days”; explicit confirmation therefore correctly stopped at `requirements_incomplete`. Updated LLM extraction to let deterministic code fill only null explicit/inferable fields, disclose date assumptions, and recompute missing fields while preserving the `llm` source.
+- The focused merge test passed, then Ruff rejected ambiguous full-width punctuation in the new test literal. Replaced only those punctuation characters with explicit Unicode escapes before rerunning static checks.
+- Second focused desktop Phase 2 reached the real Anitabi Route A successfully: 74 markers, basemap, attribution, provenance and completeness disclosure all passed. Only the final pointer click failed because marker 73 geometrically overlapped marker 1; changed the regression to keyboard focus + Enter, which verifies the existing accessible marker interaction without pretending dense coordinates do not overlap.
+- The keyboard regression then exposed that MapLibre's popup binding did not activate from native Enter in this configuration. Added an explicit Enter/Space handler and `aria-haspopup` to every marker, turning the test failure into a real accessibility fix rather than forcing the click in Playwright.
+- A later focused run timed out because the configured external LLM consumed nearly the entire 30-second browser budget, although the API ultimately returned 200. Added a Playwright request fixture that supplies explicit relative-date requirements to the real workflow start endpoint. Browser gates now test Compose Agent/MCP/Bangumi/Anitabi/planning/maps deterministically without repeated paid LLM calls; the LLM boundary remains covered independently.
+- Full Playwright acceptance then passed 8/8 in 27.5s across desktop and Pixel 7.
+- Visual inspection found Route A's 74-point list stretching the desktop grid item so the map shell became page-height with a large blank lower area. Constrained the map to a responsive viewport height, aligned grid items at the top, made the desktop map sticky, and gave the complete point list its own accessible scroll region; mobile retains the map plus a bounded scrollable list.
+- Began explicit S2/S3 closure: flight segments now require timezone-aware ordered timestamps; options require continuous transfers, exact stop counts and deterministically recomputed elapsed duration. Real point-tool exceptions now become `fetch_points_partial` with confirmed subject data preserved. Added a product-visible partial recovery panel and corrected the intro so it no longer says Anitabi necessarily returns a complete corpus.
+- Added explicit relative-clock contract scenarios: S2 covers cross-offset overnight two-segment flight timing, transfer count, deterministic 930-minute duration, USD price, late-arrival empty first day, return-buffer violation and expired-price rejection; S3 composes partial Anitabi detail, ORS 429 Haversine fallback, out-of-range unknown weather and bounded invalid-LLM failure.
+- First focused scenario run: S2 and 19 existing Provider/graph tests passed; S3 fixture used GeoJSON longitude/latitude order instead of Anitabi's documented latitude/longitude tuple and was correctly rejected. Fixed the fixture order. The new Web partial-recovery test passed (4/4 Web unit tests).
+- Second scenario run passed 21/21; Ruff and strict mypy passed. Web typecheck passed, while ESLint found an unnecessary async mock and unsafe generic string conversion in the new recovery test. Replaced it with typed URL extraction and explicit resolved responses.
+- Full regression now passes 76 Python tests, 4 Web tests, 81.00% aggregate coverage, and 98% planner coverage.
+- The first combined API/Web rebuild hit Docker Desktop's known Bake gRPC non-printable shared-key header bug before any build step. Reuse the established repository workaround `COMPOSE_BAKE=false`; no code or image layer failed.
+- Rebuilt with the established workaround: dependency cache was fully reused, API project installation took 3.3s, API layer export/unpack took under 1s, and API+Web build/recreate completed in 23.9s.
+- Updated README, demo, Provider ADR, known limitations and final-report generator to describe the integrated Anitabi/Agent behavior instead of the obsolete three-point/import demo. Re-audited all 47 groups: 46 satisfied, one externally limited by Anitabi's documented 74-detail/414-total mismatch, zero unmet.
+
 ## Session: 2026-07-14
+
+### Phase 9: Integrated Agent and Provider foundation
+- **Status:** in progress
+- User explicitly requested implementation of the audited shortcomings, emphasizing that the Agent functionality had not been implemented.
+- User clarified that Anitabi is a required product dependency; it will be implemented as a first-class read-only Provider rather than leaving import-only as the final state.
+- Found the official Anitabi Open API documentation and confirmed subject `328609` reports 414 API points versus the repository's three imported records.
+- Remediation is organized around one integrated runtime path before UI polish or additional acceptance claims.
+- No further SearchAPI live call is permitted because the prior documented budget has been exhausted; existing real-provider evidence plus new fixture/contract integration will be used.
+- Implemented the real documented Anitabi Provider, full-count validation, source attribution, bounded cache, normalized failures, typed fallback and a separate point-source mode.
+- Added `langchain-mcp-adapters==0.3.0`, a strict nine-tool Agent client, structured result normalization, fixture client, and passing focused tests/types/lint.
+- Focused evidence: 15 Anitabi/provider tests and 2 MCP-client tests pass; focused Ruff and mypy pass.
+
+### Phase 8: Requirements and simplification audit
+- **Status:** complete
+- User challenged whether Anitabi API access was required and requested a complete count of unmet or unilaterally simplified requirements.
+- Acknowledged that live mode currently hard-codes the same three-record import and that prior “complete” language overstated the conditional fallback.
+- Audit scope is the full original handoff chain, not only test-gate pass/fail. No implementation changes or paid/live provider calls are authorized by this review.
+- Re-read all required handoff documents and audited code, dependencies, API/Web wiring, tests, coverage, reports, and current public Anitabi access evidence.
+- Corrected the audit after finding the official Anitabi Open API: 18 satisfied, 0 final-state fallbacks, 14 partial/simplified, and 15 unmet.
+- Published `artifacts/requirements-compliance-audit.md`; the corrected 29 deviations comprise 24 implementation/product gaps plus 5 verification/reporting gaps.
 
 ### Phase 7: User-reported Route A map correction
 - **Status:** complete
@@ -165,6 +218,21 @@
 | 2026-07-14 | The first multilingual E5 smoke hit its five-minute budget while downloading the initial model snapshot | 1 | Re-running the resumable official model load with a larger one-time timeout and retaining the fixture gate separately |
 | 2026-07-14 | The resumed official multilingual E5 snapshot still did not finish within ten minutes | 2 | Marked the real-model smoke unpassed and continued pgvector/BM25/API/Web work that is independently verifiable |
 
+| 2026-07-14 | Phase 9 progress patch targeted a heading that did not exist in the older progress layout | 1 | Inserted the remediation section using stable section anchors instead |
+| 2026-07-14 | Combined audit/Web discovery returned non-zero because the assumed `web/` directory does not exist | 1 | Retained the audit output and switched Web discovery to the repository's actual `apps/web/` path |
+| 2026-07-14 | First strict check of the LLM/extraction boundary found Ruff punctuation/line issues and one narrowed Literal inference | 1 | Escaped full-width regex delimiters, adjusted prose punctuation/wrapping, and explicitly widened the requirement-source type |
+| 2026-07-14 | Ruff also treats full-width semicolons in Chinese user-facing strings as ambiguous | 2 | Rephrased the assumptions as short full-stop-separated sentences without changing their meaning |
+| 2026-07-14 | The new Chinese extraction regression used full-width punctuation that Ruff intentionally flags as lookalikes | 1 | Kept the Chinese-language coverage while using ASCII punctuation in the fixture text |
+| 2026-07-14 | The first flight-helper patch inserted the new function before the remainder of `build_planning_options`, leaving that remainder unreachable | 1 | Moved the helper after the completed manual/base builder before running any tests |
+| 2026-07-14 | Focused flight integration checks found one import order, one long warning, and a missing type-narrowing assertion | 1 | Ordered the helper imports, wrapped the warning, and asserted the already-required origin before conversion |
+| 2026-07-14 | Local-modification regression passed behavior but Ruff flagged a full-width comma in its Chinese fixture | 1 | Kept the Chinese instruction and switched only that delimiter to ASCII |
+| 2026-07-14 | Initial graph-local-replan patch used stale import context after Ruff reordered the file | 1 | Reapplied against the current imports and replaced the hash-only replan with a real Day-N walking replan |
+| 2026-07-14 | A PowerShell `rg` command parsed `|@app` inside a double-quoted regex as a pipeline expression | 1 | Used a plain UTF-8 file slice for endpoint placement verification and avoided shell-sensitive regex composition |
+| 2026-07-14 | First Web style patch assumed a nonexistent 700px media-query anchor | 1 | Appended the new requirements/map/legend/accessibility styles before the stable reduced-motion block |
+| 2026-07-14 | Direct `make` was unavailable in the host PowerShell; the first aggregate remediation run then found four test-only mypy narrowings, one updated capability expectation, and aggregate coverage at 78.19% | 1 | Returned to the authorized Conda Make path, validated typed models in tests, added Anitabi to the expected capability set, and started targeted boundary coverage additions |
+| 2026-07-14 | A narrow direct mypy invocation treated the editable package as untyped and also exposed an inferred heterogeneous mock-response dictionary | 1 | Kept aggregate project mypy as the authoritative invocation and explicitly typed the mock JSON content as `dict[str, object]` |
+| 2026-07-14 | Real Anitabi integration returned 74 detail records while `/lite` advertised 414 total map points | 1 | Verified the documented endpoint has no pagination and that default/`haveImage=false`/`haveImage=true` all return 74; modelled `imagesLength` separately and now discloses the documented detail subset as partial |
+
 ### Phase 5: RAG, complete Web flow, and exports
 - **Status:** complete
 - Actions taken:
@@ -194,11 +262,61 @@
   - `artifacts/final-verification.md` (Status: PASS)
   - `artifacts/system-metrics.json`, `artifacts/security-metrics.json`, `artifacts/dependency-licenses.json`
 
+### Phase 9: Requirements-compliance remediation
+- **Status:** complete
+- Actions taken:
+  - Added an official Anitabi provider and made it the production Route A source, with the legal import path retained only as a marked incomplete fallback.
+  - Added a typed LangChain MCP adapter and replaced the placeholder workflow with an integrated confirmation, subject, Route A, matrix, weather, validation, and bounded-review graph.
+  - Replaced the legacy placeholder graph tests with async integration tests covering the three confirmation boundaries, typed Route A/Route B output, fail-closed point fetches, local replan isolation, and the three-revision cap.
+  - Added real/configured and deterministic-fallback natural-language extraction boundaries, a configured real structured Reviewer, flight/manual comparison with deterministic labels, dynamic project RAG retrieval, real-E5 Compose mode, weather-driven walking reduction, and labelled Haversine matrix degradation.
+  - Passed 13 focused Agent/LLM tests after these integrations; focused Ruff and mypy checks are clean.
+
+### Phase 12: Integrated final acceptance
+- **Status:** complete
+- Actions taken:
+  - Forced the live smoke to exercise Anitabi regardless of local fallback defaults; the current official response produced 74 sourced details and an explicit 414-count partial-data warning.
+  - Classified retryable optional-provider outages as visible degraded evidence while keeping authentication and validation failures gate-blocking; SearchAPI remained disabled with zero new requests.
+  - Corrected checkpoint recovery fixtures to provide relative dates and every required explicit choice.
+  - Added a non-root writable, project-scoped Hugging Face cache volume and a bounded first-use E5 wait for clean Compose acceptance.
+  - Removed Playwright response and Windows screenshot-file races using response-bound waits and per-run evidence paths.
+  - Passed the final `make verify-all` invocation across Phase 1 through Phase 6 after a clean project-volume rebuild.
+- Evidence:
+  - `artifacts/final-verification.md` (Status: PASS)
+  - `artifacts/phase-1-report.md` through `artifacts/phase-6-report.md`
+  - `artifacts/requirements-compliance-audit.md`
+
+### Phase 13: Continuous conversational Agent
+- **Status:** complete
+- Session start:
+  - User identified that the shipped Agent behaves primarily as a workflow wizard and lacks durable multi-turn conversation.
+  - Restored planning context with the planning-with-files skill and confirmed the previous integrated implementation remains an uncommitted working-tree baseline.
+  - Scope is trip-scoped message persistence, context recovery, intent-aware conversation, safe changes, and a Web chat surface while preserving deterministic confirmation/tool boundaries.
+  - Confirmed the existing trip-event store is sufficient for durable messages; no conversation-specific migration is required.
+  - Identified the integration boundary: graph snapshots intentionally omit raw chat, while the API currently exposes no message resource. The new bounded conversation layer will sit alongside the graph state.
+  - Established the mutation boundary: natural-language requests become typed actions executed by deterministic code; unsupported or confirmation-sensitive requests become explicit proposals, never silent changes.
+  - Chosen implementation: a separate typed `ConversationAgent` consumes the current normalized workflow plus a bounded recent transcript. It handles grounded status/explanation questions and emits a typed modification proposal; the API alone executes the existing bounded local replan.
+  - Browser recovery will persist only the opaque trip identifier in session storage, then reload namespace-checked workflow/message resources from the API.
+  - Added strict conversation intent/action/message/request/response schemas, event timestamps, normalized workflow context, deterministic grounded responses, structured LLM synthesis, and conservative fallback behavior.
+  - Wired workflow creation to seed the durable transcript, added namespace-checked GET/POST message endpoints, and routed typed chat modifications through the existing deterministic single-day replanner.
+  - Focused conversation and memory tests pass (5/5), covering clarification, typed changes, persisted ordering/timestamps, reload reads, and thread isolation.
+  - Added Web session recovery for the opaque trip ID, workflow/message rehydration, a responsive persistent conversation log, grounded prompt shortcuts, and typed plan-change/confirmation badges.
+  - Existing Web lint and Vitest tests pass after integration; a dedicated send/reload recovery test remains next.
+  - Added and passed the Web send/reload recovery test (5/5 Web tests total) plus the production Web build.
+  - Passed repository `make lint`, `make typecheck`, and `make test`: 78 Python tests and 5 Web tests are green; aggregate Python coverage remains above the 80% gate.
+  - Rebuilt all four Compose services successfully; every service is healthy and existing project volumes were preserved.
+  - First desktop conversational E2E reached an HTTP 200 response but exposed avoidable LLM latency for a deterministic modification. Updated the responder to short-circuit recognized bounded intents and made the browser test await the POST response explicitly.
+  - Rebuilt the API, passed Compose health, and passed the desktop real-stack conversational replan/reload acceptance in 5.0 seconds.
+  - Passed the focused desktop and mobile conversational replan/reload acceptance (2/2).
+  - Passed final `make verify-all` in 554.9 seconds: all six phase reports are PASS, 79 Python tests and 5 Web unit tests pass, the clean four-service rebuild is healthy, and the serialized full browser suite passes 10/10 including continuous conversation on both viewports.
+  - Updated operator/demo/limitation documentation to describe persistence, bounded context, safe mutation scope, and browser recovery.
+  - Post-documentation checks passed: full Python/Web lint, full Python/Web typechecks, the six-file documentation contract, and a 1,292-file secret scan.
+  - Optional in-app Browser setup remained unavailable due the known runtime initialization fault; no user browser state was inspected. The passing serialized desktop/mobile Playwright acceptance remains the visual/interactive evidence.
+
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Complete — all six phases plus the user-reported map correction passed their scoped verification |
-| Where am I going? | Handoff complete; a larger point corpus requires a permitted sourced import |
-| What's the goal? | Fully implement and verify all six repository phases and correct the reported Route A map regression |
+| Where am I? | Complete — all six phases plus persistent conversational Agent acceptance pass |
+| Where am I going? | Handoff complete; remaining limits are explicitly documented product boundaries |
+| What's the goal? | Deliver the verified pilgrimage Agent with sourced points, deterministic planning, and durable multi-turn conversation |
 | What have I learned? | See `findings.md` |
-| What have I done? | Completed and verified Phases 1–6, then restored the real basemap, clarified the three-point fixture scope, and verified desktop/mobile behavior |
+| What have I done? | Completed Phases 1–13, integrated Anitabi and the runtime Agent, added persistent conversation, and passed `make verify-all` |

@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 BASE = "http://127.0.0.1:8000/api/knowledge"
+REQUEST_TIMEOUT_SECONDS = 180
 
 
 def request_json(
@@ -31,7 +32,7 @@ def request_json(
         headers={"Content-Type": "application/json"} if body else {},
     )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             if response.status != expected_status:
                 raise RuntimeError(f"unexpected knowledge API status {response.status}")
             return json.loads(response.read())
@@ -54,6 +55,10 @@ def main() -> int:
         "authority_level": 1,
         "language": "en",
     }
+    print(
+        "Waiting for bounded first-use E5 initialization (up to 180 seconds)...",
+        flush=True,
+    )
     created = request_json("/documents", method="POST", payload=upload)
     document_id = str(created["document"]["document_id"])
     duplicate = request_json("/documents", method="POST", payload=upload)

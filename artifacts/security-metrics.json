@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "files_scanned": 28,
+  "files_scanned": 38,
   "local_secret_exposures": 0,
   "conversation_body_exposures": 0,
   "mcp_tool_count": 9,

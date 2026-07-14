@@ -4,7 +4,7 @@
 Read the complete required handoff chain, implement and verify all six project phases, and finish only when `make verify-all` passes or a genuine user-only blocker is documented.
 
 ## Current Phase
-Complete — Phase 7 map correction verified and all four Compose services healthy
+Phase 13 complete — continuous trip conversation and a larger Agent role
 
 ## Phases
 
@@ -59,6 +59,52 @@ Complete — Phase 7 map correction verified and all four Compose services healt
 - [x] Rebuild the Web service and confirm the correction interactively
 - **Status:** complete
 
+### Phase 8: Requirements and simplification audit
+- [x] Re-read the complete handoff chain and enumerate normative requirements
+- [x] Verify every requirement against code, configuration, tests, reports, and runtime boundaries
+- [x] Re-check current official Anitabi API/access evidence
+- [x] Classify each item as satisfied, conditional fallback, simplified/partial, or unmet
+- [x] Publish an evidence-linked count without changing product implementation
+- **Status:** complete
+
+### Phase 9: Integrated Agent and Provider foundation
+- [x] Add the required MCP adapter dependency and a typed MCP client boundary
+- [x] Replace placeholder graph state/nodes with normalized trip requirements and real provider/planner results
+- [x] Implement Anitabi as a first-class required read-only Provider with fixture/contracts/cache/honest partial semantics, while keeping configurable legal import as fallback
+- [x] Wire real/fixture E5 selection and remove fixture embeddings from production composition
+- [x] Add focused contracts and pass lint, typecheck, and Agent/provider tests
+- **Status:** complete
+
+### Phase 10: Product workflow, constraints, transport, weather, and memory
+- [x] Drive the Web through the durable Agent workflow instead of demo endpoints
+- [x] Add editable constraints and explicit requirement/subject/access/base/must/exclude confirmations
+- [x] Integrate manual/flight access options, weather constraints, configured ORS/Haversine, Reviewer, omissions, and preference lifecycle
+- [x] Add data-state/source/time presentation and actionable recovery states
+- **Status:** complete
+
+### Phase 11: Complete maps, revision, RAG and scenarios
+- [x] Add Route A/Route B map switching and provenance legend
+- [x] Implement schema-driven local natural-language changes with percentage constraints
+- [x] Make RAG queries/upload/conflicts dynamic in Agent/Web
+- [x] Implement complete S1, S2, and S3 acceptance scenarios
+- **Status:** complete
+
+### Phase 12: Coverage, full gates, documentation, and honest acceptance
+- [x] Raise Domain Validator branch coverage to at least 90%
+- [x] Update reports and limitations to reflect actual integrated behavior and remaining authorized fallbacks
+- [x] Run and fix every phase gate and `make verify-all`
+- [x] Re-audit all 47 capability groups and close every implementation gap; retain the documented Anitabi detail-coverage limitation
+- **Status:** complete
+
+### Phase 13: Continuous conversational Agent
+- [x] Audit current workflow/checkpoint/message persistence and define the conversation contract
+- [x] Add typed persistent conversation messages, bounded context reconstruction, and intent routing
+- [x] Support clarification, trip questions, plan explanations, and safe requirement/plan changes across turns
+- [x] Add a trip-scoped Web chat surface with history, pending state, and actionable Agent responses
+- [x] Add unit/API/Web/E2E coverage for conversation recovery and deterministic confirmation boundaries
+- [x] Rebuild Compose and pass affected gates plus `make verify-all`
+- **Status:** complete
+
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
 2. What code already exists, and which unrelated user changes must be preserved?
@@ -72,6 +118,7 @@ Complete — Phase 7 map correction verified and all four Compose services healt
 | Treat each phase gate plus its human-readable artifact as the phase completion condition | Matches the mandated workflow |
 | Use the official OpenFreeMap Liberty style with visible OpenFreeMap/OpenStreetMap attribution | Restores the specified basemap without an API key while preserving source licensing and a configurable future replacement path |
 | Keep the three verified fixture points but label their scope honestly | Adding unsourced scene coordinates would violate the no-invention and legal-access boundaries |
+| Make conversation trip-scoped and durable, but keep arithmetic, membership, confirmations, and tool execution deterministic | Expands the Agent's role without allowing free-form model output to silently mutate constraints or invent travel facts |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -139,6 +186,26 @@ Complete — Phase 7 map correction verified and all four Compose services healt
 | Initial Phase 7 planning patch matched mojibake text from a legacy console read instead of the UTF-8 file | 1 | Re-read the planning file with explicit UTF-8 and patch the real Unicode text |
 | Phase 7 focused lint rejected exported non-components in `App.tsx` and one Vitest asymmetric matcher typed as `any` | 1 | Move map configuration to a dedicated typed module and replace the matcher with narrowed exact assertions |
 | In-app Browser runtime initialization twice failed with `Cannot redefine property: process` even after a fresh kernel reset | 2 | Stop repeating the plugin failure; use the passing repository Playwright desktop/mobile run plus its fresh screenshots for visual verification |
+| First Anitabi audit-correction patch matched report rows in the wrong order | 1 | Inspect the exact report/finding lines and apply smaller file-specific corrections |
+| First official Anitabi documentation open call had a malformed JavaScript quote | 1 | Use the direct official documentation URL in a corrected bounded open call |
+| Combined Anitabi count update patch used progress sections in the wrong order | 1 | Apply the findings and progress corrections as independent patches with local context |
+| Anitabi design finding patch omitted the blank/table-header context under `Technical Decisions` | 1 | Patch after the exact table header instead of matching a non-adjacent first decision row |
+| Second Anitabi decision insertion again combined the heading with a non-adjacent row | 2 | Match only the existing decision row and insert directly before it |
+| First focused Anitabi static pass found one 101-character line and two import-order findings | 1 | Apply narrow formatting/import fixes, then rerun tests, Ruff, and mypy with all results preserved |
+| Focused Anitabi tests and Ruff passed; mypy rejected the fallback's `Any` primary return | 1 | Replace `Any` with a typed point-Provider protocol and rerun mypy/tests |
+| MCP client Ruff passed; mypy inferred the first fixture branch's concrete result type across all branches | 1 | Annotate the shared fixture result as Pydantic `BaseModel` before branch assignment |
+| First integrated graph static pass found one unused import, one long line, and optional confirmation IDs not narrowed by `all()` | 1 | Apply explicit local-ID `None` checks and narrow formatting fixes |
+| First API workflow integration patch included a non-adjacent SQLAlchemy import context | 1 | Inspect exact API import/runtime/response sections and patch them independently |
+| Legacy graph tests reached the new explicit-requirement guard and failed four old placeholder assumptions | 1 | Rewrite them as async integrated-flow tests with structured confirmations and real fixture MCP results; preserve only Day 2 hash on injected replan |
+| First Phase 13 planning update used a heading that did not exist in `findings.md` | 1 | Re-read the exact planning-file tails and patch against stable nearby text |
+| First Phase 13 conversation static pass found intentional Chinese punctuation, two long lines, and two string literals treated as enums | 1 | Add a file-scoped punctuation exception, wrap the strings, and use the literal values directly |
+| Phase 13 API static pass found only import ordering and punctuation/line wrapping after mypy passed | 1 | Apply Ruff's mechanical import sort and narrow user-facing string fixes |
+| Direct mypy invocation on one new test path treated the editable local package as an untyped installed dependency | 1 | Keep source mypy clean and use the repository-configured full `mypy` gate for test typing |
+| Web conversation reload test matched both the prompt shortcut and the recovered user message | 1 | Assert the intentional pair of visible elements; the transcript recovery itself succeeded |
+| First Compose conversation E2E timed out before a late HTTP 200 because an obvious local modification still consulted the configured LLM | 1 | Route recognized deterministic intents before LLM synthesis and await the message response explicitly in E2E |
+| A focused command accidentally passed the TypeScript Playwright spec to Python Ruff | 1 | Ignore the irrelevant parser output and use the existing ESLint/TypeScript gates for Web files |
+| Phase-gate inspection attempted a nonexistent phase-specific script filename | 1 | Read the actual centralized `scripts/gate.py` definitions instead |
+| Optional in-app Browser bootstrap again failed before creating `agent` with `Cannot redefine property: process` | 3 | Stop retrying and retain the passing repository Playwright desktop/mobile acceptance as visual evidence |
 
 ## Guardrails
 - Never expose `.env`, secrets, tokens, headers, cookies, or signed MCP URLs.
