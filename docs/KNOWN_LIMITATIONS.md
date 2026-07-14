@@ -2,7 +2,8 @@
 
 ## External data
 
-- The pilgrimage-point boundary uses legal JSON/GeoJSON import plus fixtures; it does not scrape or bypass Anitabi.
+- The pilgrimage-point boundary uses legal JSON/GeoJSON import plus fixtures; it does not scrape or bypass Anitabi. The included subject `328609` fixture has three sourced records solely for reproducible acceptance and is not an exhaustive real-world location set. Operators can extend `fixtures/providers/points.geojson` with permitted records carrying valid coordinates and source URLs.
+- The MapLibre view loads the no-key OpenFreeMap Liberty style and OpenStreetMap-derived tiles at runtime. It needs network access for street detail, displays the provider/data attribution, and degrades to numbered markers plus the adjacent source list if the basemap is unavailable.
 - Bangumi, ORS, Open-Meteo, and SearchAPI can change or become unavailable. Providers use timeouts, bounded retries, normalized partial/unknown states, provenance, and caches, but the user must reconfirm time-sensitive facts.
 - SearchAPI smoke has a strict call budget. It searches only and never follows booking/payment links.
 - Google Maps URLs are handoff links, not evidence that a route is open or safe at travel time.

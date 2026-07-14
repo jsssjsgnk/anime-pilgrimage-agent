@@ -98,7 +98,8 @@ Current fixed-corpus RAG metrics are Recall@6 **0.929**, MRR@10 **0.952**, and C
 
 ## Known limitations
 
-- Fixture points are used because no stable, clearly authorized public Anitabi API was established; legal JSON/GeoJSON import is the supported boundary.
+- The included legal JSON/GeoJSON fixture contains exactly three sourced points for Bangumi subject `328609`; it is a reproducible demo corpus, not a claim that the work has only three real-world pilgrimage locations. Replace or extend `fixtures/providers/points.geojson` with permitted, sourced records to expand Route A.
+- The interactive MapLibre basemap uses the no-key OpenFreeMap Liberty style with OpenStreetMap data and visible attribution, so street tiles require an internet connection; the numbered markers and adjacent point list remain available if the basemap cannot load.
 - Flights, routes, weather, prices, opening/access rules, and photography rules are snapshots or estimates and must be reconfirmed before departure.
 - The MVP extracts text PDFs with pypdf but does not run OCR; scanned PDFs return `needs_ocr`.
 - The Web demonstrates one validated scenario and local Day 2 revision rather than a general natural-language patch compiler.

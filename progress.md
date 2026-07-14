@@ -2,6 +2,25 @@
 
 ## Session: 2026-07-14
 
+### Phase 7: User-reported Route A map correction
+- **Status:** complete
+- User reported that the Route A map looked incomplete and asked why only three points appeared.
+- Inspected the supplied screenshot and reproduced the implementation cause in `apps/web/src/App.tsx`.
+- Confirmed the map has no basemap source and all interaction is disabled, contrary to the original MapLibre + OpenStreetMap/OpenFreeMap requirement.
+- Confirmed both provider modes currently use the same three-record legal GeoJSON import; no point is being hidden by the UI.
+- Selected the existing calm editorial atlas design system and the UI/UX accessibility/touch/responsive rules for the correction.
+- Replaced the background-only MapLibre style with the current official OpenFreeMap Liberty style and visible OpenFreeMap/OpenStreetMap attribution.
+- Enabled cooperative drag/zoom, localized navigation/fullscreen controls, 44px numbered point markers, safe text-only popups, loading/failure feedback, and list-based fallback.
+- Changed ambiguous “complete candidate set/import complete” copy to disclose that the current legal import contains three records and is not the complete real-world scene set.
+- Added unit coverage for basemap configuration and Phase 2 browser assertions for the real style request, loaded map canvas, controls, markers, attribution, and dataset-scope copy.
+- First focused check: TypeScript passed and all three Web unit tests passed; ESLint found one Fast Refresh module-boundary warning and one unsafe asymmetric matcher, which are being corrected in a dedicated typed config module.
+- Moved the basemap constants/options into `route-map-config.ts`, replaced the unsafe matcher with exact typed assertions, and passed focused Web lint, TypeScript, and all three unit tests.
+- Rebuilt the production Web container; all four Compose services are healthy. The focused Phase 2 Playwright run passed both desktop and mobile cases and regenerated their screenshots.
+- The optional in-app Browser runtime could not initialize because its local bootstrap twice raised `Cannot redefine property: process`, including after a clean kernel reset. Per the browser skill recovery rules, stopped repeating it and continued visual QA from the fresh Playwright artifacts.
+- Visual review of the fresh desktop/mobile screenshots confirmed the real street basemap, numbered markers, and controls, and caught duplicate attribution from combining custom credit with the style's built-in credit. Removed only the duplicate custom text; the official expanded attribution remains.
+- Passed repository-wide `make lint`, `make typecheck`, and `make test` (57 Python tests, 3 Web tests, 80.13% Python coverage), then passed all eight desktop/mobile E2E cases after the normal fixed-corpus seed and removed that corpus again.
+- Added README/known-limitations disclosure and `artifacts/map-correction-report.md`; final Compose health is four of four healthy services.
+
 ### Phase 0: Required handoff discovery
 - **Status:** complete
 - **Started:** 2026-07-14
@@ -178,8 +197,8 @@
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Complete — all six phases and final acceptance passed |
-| Where am I going? | Handoff complete |
-| What's the goal? | Fully implement and verify all six repository phases |
+| Where am I? | Complete — all six phases plus the user-reported map correction passed their scoped verification |
+| Where am I going? | Handoff complete; a larger point corpus requires a permitted sourced import |
+| What's the goal? | Fully implement and verify all six repository phases and correct the reported Route A map regression |
 | What have I learned? | See `findings.md` |
-| What have I done? | Completed, verified, and committed Phases 1–5; Phase 6/final acceptance is ready for its focused commit |
+| What have I done? | Completed and verified Phases 1–6, then restored the real basemap, clarified the three-point fixture scope, and verified desktop/mobile behavior |

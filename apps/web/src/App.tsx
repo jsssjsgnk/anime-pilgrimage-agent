@@ -20,6 +20,8 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 
+import { createRouteMapOptions } from "./route-map-config";
+
 interface Provenance {
   provider: string;
   source_url: string | null;
@@ -166,55 +168,69 @@ function saveFile(filename: string, type: string, content: string): void {
 function RouteMap({ points }: { points: Point[] }) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
+  const [styleStatus, setStyleStatus] = useState<"loading" | "ready" | "unavailable">("loading");
 
   useEffect(() => {
     if (!container.current || points.length === 0) return;
+    setStyleStatus("loading");
     const bounds = new maplibregl.LngLatBounds();
     points.forEach((point) => bounds.extend([point.longitude, point.latitude]));
-    const instance = new maplibregl.Map({
-      container: container.current,
-      style: {
-        version: 8,
-        sources: {},
-        layers: [{ id: "canvas", type: "background", paint: { "background-color": "#e7eee8" } }],
-      },
-      bounds,
-      fitBoundsOptions: { padding: 56, maxZoom: 15 },
-      attributionControl: false,
-      interactive: false,
-    });
+    const instance = new maplibregl.Map(createRouteMapOptions(container.current, bounds));
+    let mounted = true;
+    let styleReady = false;
+
+    instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    instance.addControl(new maplibregl.FullscreenControl(), "top-right");
     instance.on("load", () => {
-      instance.addSource("route-a", {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: points.map((point) => ({
-            type: "Feature",
-            geometry: { type: "Point", coordinates: [point.longitude, point.latitude] },
-            properties: { name: point.name },
-          })),
-        },
-      });
-      instance.addLayer({
-        id: "route-a-points",
-        type: "circle",
-        source: "route-a",
-        paint: {
-          "circle-radius": 9,
-          "circle-color": "#b93625",
-          "circle-stroke-color": "#fffdf8",
-          "circle-stroke-width": 3,
-        },
-      });
+      styleReady = true;
+      if (mounted) setStyleStatus("ready");
     });
+    instance.on("error", () => {
+      if (mounted && !styleReady) setStyleStatus("unavailable");
+    });
+
+    const markers = points.map((point, index) => {
+      const markerElement = document.createElement("button");
+      markerElement.type = "button";
+      markerElement.className = "route-map-marker";
+      markerElement.textContent = String(index + 1).padStart(2, "0");
+      markerElement.title = point.name;
+      markerElement.setAttribute("aria-label", `地图点位 ${index + 1}：${point.name}`);
+      const popup = new maplibregl.Popup({ closeButton: false, offset: 28 }).setText(
+        `${String(index + 1).padStart(2, "0")} · ${point.name}`,
+      );
+      return new maplibregl.Marker({ element: markerElement, anchor: "center" })
+        .setLngLat([point.longitude, point.latitude])
+        .setPopup(popup)
+        .addTo(instance);
+    });
+
     map.current = instance;
     return () => {
+      mounted = false;
+      markers.forEach((marker) => marker.remove());
       instance.remove();
       map.current = null;
     };
   }, [points]);
 
-  return <div ref={container} className="route-map" aria-label={`Route A 地图，共 ${points.length} 个点`} />;
+  return (
+    <div className="route-map-shell">
+      <div
+        ref={container}
+        className="route-map"
+        role="region"
+        aria-label={`Route A 交互式地图，共 ${points.length} 个点；可缩放和拖动，点位详情见相邻列表`}
+        data-map-provider="OpenFreeMap"
+        data-map-status={styleStatus}
+      />
+      {styleStatus !== "ready" && (
+        <p className={styleStatus === "unavailable" ? "map-status map-status-error" : "map-status"} role="status">
+          {styleStatus === "unavailable" ? "底图暂时不可用；编号点位和右侧列表仍可使用。" : "正在加载 OpenStreetMap 底图…"}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function App() {
@@ -452,8 +468,8 @@ export function App() {
         {confirmedId && routeQuery.data && (
           <section className="route-section" aria-labelledby="route-a-title">
             <div className="results-heading">
-              <div><p className="eyebrow">完整候选集</p><h2 id="route-a-title">Route A · {routeQuery.data.points.length} 个有来源点位</h2></div>
-              <span className={routeQuery.data.is_complete ? "source-chip verified" : "source-chip"}>{routeQuery.data.is_complete ? "导入完整" : "部分数据"}</span>
+              <div><p className="eyebrow">当前导入候选集</p><h2 id="route-a-title">Route A · {routeQuery.data.points.length} 个有来源点位</h2></div>
+              <span className={routeQuery.data.is_complete ? "source-chip verified" : "source-chip"}>{routeQuery.data.is_complete ? "文件读取完整" : "部分数据"}</span>
             </div>
             <div className="route-layout">
               <RouteMap points={routeQuery.data.points} />
@@ -467,7 +483,7 @@ export function App() {
                 ))}
               </ol>
             </div>
-            <p className="route-note">这些点尚未按时间删减。下一阶段只会从 Route A 选择可执行子集，并解释每个遗漏。</p>
+            <p className="route-note"><strong>数据范围：</strong>当前合法导入文件只包含这 {routeQuery.data.points.length} 个有来源点位；“文件读取完整”不代表作品在现实中的全部圣地。扩充数据需要提供带来源 URL 的合法 JSON/GeoJSON。这些点尚未按时间删减，下一阶段只会选择可执行子集并解释遗漏。</p>
           </section>
         )}
 

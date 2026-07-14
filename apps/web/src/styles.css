@@ -518,7 +518,8 @@ textarea:focus {
   gap: 16px;
 }
 
-.route-map {
+.route-map-shell {
+  position: relative;
   width: 100%;
   min-height: 310px;
   overflow: hidden;
@@ -527,6 +528,81 @@ textarea:focus {
   background:
     linear-gradient(135deg, rgb(22 77 68 / 5%) 25%, transparent 25%) 0 0 / 24px 24px,
     #e7eee8;
+}
+
+.route-map {
+  width: 100%;
+  min-height: 310px;
+}
+
+.route-map .maplibregl-ctrl-group button {
+  width: 44px;
+  height: 44px;
+}
+
+.route-map .maplibregl-ctrl-group button:focus-visible,
+.route-map-marker:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.route-map .maplibregl-ctrl-attrib {
+  max-width: calc(100% - 12px);
+  color: var(--ink-muted);
+  background: rgb(255 253 248 / 92%);
+}
+
+.route-map-marker {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  place-items: center;
+  color: white;
+  font: 800 12px/1 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  border: 3px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 3px 10px rgb(23 35 31 / 28%);
+  cursor: pointer;
+}
+
+.route-map-marker:hover {
+  background: #8f2a1d;
+}
+
+.route-map .maplibregl-popup-content {
+  padding: 10px 12px;
+  color: var(--ink);
+  font-weight: 750;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 5px 16px rgb(23 35 31 / 18%);
+}
+
+.map-status {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 12px;
+  max-width: calc(100% - 84px);
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 750;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgb(255 253 248 / 94%);
+  box-shadow: 0 2px 8px rgb(23 35 31 / 12%);
+  pointer-events: none;
+}
+
+.map-status-error {
+  color: var(--danger);
+  border-color: #e5b7a9;
+  background: #fff0ea;
 }
 
 .point-list {

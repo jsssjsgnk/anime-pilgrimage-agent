@@ -4,7 +4,7 @@
 Read the complete required handoff chain, implement and verify all six project phases, and finish only when `make verify-all` passes or a genuine user-only blocker is documented.
 
 ## Current Phase
-Complete — all six phases and `make verify-all` passed
+Complete — Phase 7 map correction verified and all four Compose services healthy
 
 ## Phases
 
@@ -51,6 +51,14 @@ Complete — all six phases and `make verify-all` passed
 - [x] Commit the completed phase if Git identity is configured
 - **Status:** complete
 
+### Phase 7: User-reported Route A map correction
+- [x] Reproduce and identify the blank-map and three-point causes
+- [x] Add the specified OpenStreetMap/OpenFreeMap basemap with accessible interaction and attribution
+- [x] Add regression coverage for the real basemap and point-count disclosure
+- [x] Verify Web unit/type/lint checks and serialized desktop/mobile browser behavior
+- [x] Rebuild the Web service and confirm the correction interactively
+- **Status:** complete
+
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
 2. What code already exists, and which unrelated user changes must be preserved?
@@ -62,6 +70,8 @@ Complete — all six phases and `make verify-all` passed
 | Use only repository handoffs, user instructions, and required official technical docs | Enforces the project information boundary |
 | Keep durable plan, findings, and progress files in the repository root | Supports long-running autonomous work and recovery |
 | Treat each phase gate plus its human-readable artifact as the phase completion condition | Matches the mandated workflow |
+| Use the official OpenFreeMap Liberty style with visible OpenFreeMap/OpenStreetMap attribution | Restores the specified basemap without an API key while preserving source licensing and a configurable future replacement path |
+| Keep the three verified fixture points but label their scope honestly | Adding unsourced scene coordinates would violate the no-invention and legal-access boundaries |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -126,6 +136,9 @@ Complete — all six phases and `make verify-all` passed
 | Initial Phase 6 license check used the Conda interpreter and saw only four bootstrap packages | 1 | Run the audit through locked `uv run`; final inventory covers 114 Python and 284 Node records |
 | First aggregate wrapper had a one-second timeout and stopped in Phase 1 before live calls | 1 | Relaunch with the full aggregate acceptance budget |
 | First aggregate Phase 1 browser check accidentally included the Phase 5 evidence spec after the clean corpus was removed | 1 | Scope historical phase browser gates to their own feature specs; Phase 5/6 retain the full seeded suite |
+| Initial Phase 7 planning patch matched mojibake text from a legacy console read instead of the UTF-8 file | 1 | Re-read the planning file with explicit UTF-8 and patch the real Unicode text |
+| Phase 7 focused lint rejected exported non-components in `App.tsx` and one Vitest asymmetric matcher typed as `any` | 1 | Move map configuration to a dedicated typed module and replace the matcher with narrowed exact assertions |
+| In-app Browser runtime initialization twice failed with `Cannot redefine property: process` even after a fresh kernel reset | 2 | Stop repeating the plugin failure; use the passing repository Playwright desktop/mobile run plus its fresh screenshots for visual verification |
 
 ## Guardrails
 - Never expose `.env`, secrets, tokens, headers, cookies, or signed MCP URLs.
