@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from itertools import pairwise
 from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo
@@ -16,6 +16,7 @@ from pilgrimage_agent.domain.workspace import (
     AreaCluster,
     CandidateDecision,
     CandidateEdge,
+    DerivedKnowledgeRule,
     ItineraryDay,
     ItineraryVersion,
     PlanningStrategy,
@@ -45,6 +46,9 @@ class HierarchicalPlanningRequest(StrictModel):
     graph_version: int = Field(default=1, ge=1)
     itinerary_version: int = Field(default=1, ge=1)
     visit_minutes: int = Field(default=30, ge=10, le=180)
+    fixed_day_assignments: dict[UUID, int] = Field(default_factory=dict)
+    fixed_positions: dict[UUID, int] = Field(default_factory=dict)
+    knowledge_rules: tuple[DerivedKnowledgeRule, ...] = ()
 
     @model_validator(mode="after")
     def references_and_dates_are_valid(self) -> HierarchicalPlanningRequest:
@@ -60,6 +64,15 @@ class HierarchicalPlanningRequest(StrictModel):
             raise ValueError("must/exclude references must belong to the candidate graph")
         if self.must_visit_place_ids & self.excluded_place_ids:
             raise ValueError("one place cannot be both required and excluded")
+        if not set(self.fixed_day_assignments).issubset(place_ids):
+            raise ValueError("fixed day assignments must reference candidate places")
+        if not set(self.fixed_positions).issubset(place_ids):
+            raise ValueError("fixed positions must reference candidate places")
+        day_count = (self.requirements.end_date - self.requirements.start_date).days + 1
+        if any(day < 1 or day > day_count for day in self.fixed_day_assignments.values()):
+            raise ValueError("fixed place day is outside the confirmed trip")
+        if any(position < 0 or position > 100 for position in self.fixed_positions.values()):
+            raise ValueError("fixed position is outside the supported range")
         if len(self.strategies) != len(set(self.strategies)):
             raise ValueError("planning strategies must be unique")
         ZoneInfo(self.timezone)
@@ -318,6 +331,31 @@ def _day_windows(request: HierarchicalPlanningRequest) -> tuple[tuple[datetime, 
     return tuple(windows)
 
 
+def _closed_by_rule(
+    place_id: UUID, day: date, rules: tuple[DerivedKnowledgeRule, ...]
+) -> bool:
+    for rule in rules:
+        if rule.status != "active_constraint" or rule.rule_type != "closure_date_range":
+            continue
+        target_ids = {
+            item.entity_id for item in rule.target_refs if item.entity_type == "place"
+        }
+        if str(place_id) not in target_ids:
+            continue
+        raw_start = rule.value.get("closed_from")
+        raw_end = rule.value.get("closed_until")
+        if not isinstance(raw_start, str) or not isinstance(raw_end, str):
+            continue
+        try:
+            closed_from = date.fromisoformat(raw_start)
+            closed_until = date.fromisoformat(raw_end)
+        except ValueError:
+            continue
+        if closed_from <= day <= closed_until:
+            return True
+    return False
+
+
 def _plan_strategy(
     request: HierarchicalPlanningRequest,
     graph: TripCandidateGraph,
@@ -341,35 +379,103 @@ def _plan_strategy(
     )
     windows = _day_windows(request)
     assignments: dict[int, list[AreaCluster]] = defaultdict(list)
-    assigned_minutes = [0 for _window in windows]
-    for area in area_order:
-        day_index = min(
-            range(len(windows)),
-            key=lambda index: (assigned_minutes[index], index),
-        )
-        assignments[day_index].append(area)
-        assigned_minutes[day_index] += area.estimated_visit_minutes
-
     omissions: dict[UUID, StructuredOmission] = {}
+    reachable_areas: list[AreaCluster] = []
+    for area in area_order:
+        base_distance = haversine_meters(
+            request.base.coordinate, area.representative_coordinate
+        )
+        estimated_one_way_seconds = max(15 * 60, base_distance / 13.9)
+        if estimated_one_way_seconds > 3 * 60 * 60:
+            for place_id in area.place_ids:
+                omissions[place_id] = StructuredOmission(
+                    place_id=place_id,
+                    reason_code="unreachable",
+                    detail=(
+                        "The area is outside the bounded three-hour estimated "
+                        "one-way access radius from the selected base."
+                    ),
+                )
+            continue
+        reachable_areas.append(area)
+    selected_areas = reachable_areas[: len(windows)]
+    for day_index, area in enumerate(selected_areas):
+        assignments[day_index].append(area)
+    for area in reachable_areas[len(windows) :]:
+        for place_id in area.place_ids:
+            omissions[place_id] = StructuredOmission(
+                place_id=place_id,
+                reason_code="lower_strategy_score",
+                detail="A higher-scoring reachable area was selected for the available day.",
+            )
+
     days: list[ItineraryDay] = []
     walking_limit = _walking_limit(request.requirements)
     scheduled_ids: set[UUID] = set()
     for day_index, (window_start, window_end) in enumerate(windows):
-        area_ids = tuple(area.area_id for area in assignments[day_index])
-        candidates = tuple(
-            by_place[place_id]
+        day_number = day_index + 1
+        assigned_candidate_ids = {
+            place_id
             for area in assignments[day_index]
             for place_id in area.place_ids
+            if request.fixed_day_assignments.get(place_id, day_number) == day_number
+        }
+        assigned_candidate_ids.update(
+            place_id
+            for place_id, target_day in request.fixed_day_assignments.items()
+            if target_day == day_number
+        )
+        candidates = tuple(
+            by_place[place_id]
+            for place_id in sorted(assigned_candidate_ids, key=str)
             if place_id not in request.excluded_place_ids
         )
-        ordered = _two_opt(_nearest_neighbor(candidates, request.base), request.base)
+        day_areas = tuple(
+            area
+            for area in request.areas
+            if set(area.place_ids).intersection(assigned_candidate_ids)
+        )
+        area_ids = tuple(
+            sorted(
+                {area.area_id for area in day_areas},
+                key=str,
+            )
+        )
+        ordered_list = list(
+            _two_opt(_nearest_neighbor(candidates, request.base), request.base)
+        )
+        for place_id, position in sorted(
+            request.fixed_positions.items(), key=lambda item: (item[1], str(item[0]))
+        ):
+            selected = next(
+                (item for item in ordered_list if item.place_id == place_id), None
+            )
+            if selected is not None:
+                ordered_list.remove(selected)
+                ordered_list.insert(min(position, len(ordered_list)), selected)
+        ordered = tuple(ordered_list)
         visits: list[ScheduledPlace] = []
-        current_coordinate = request.base.coordinate
-        current_time = window_start
+        local_origin = (
+            day_areas[0].representative_coordinate
+            if day_areas
+            else request.base.coordinate
+        )
+        transfer_distance = haversine_meters(request.base.coordinate, local_origin)
+        transfer_seconds = max(15 * 60, transfer_distance / 13.9) if day_areas else 0.0
+        current_coordinate = local_origin
+        current_time = window_start + timedelta(seconds=transfer_seconds)
+        effective_window_end = window_end - timedelta(seconds=transfer_seconds)
         walked = 0.0
         for place in ordered:
+            if _closed_by_rule(place.place_id, window_start.date(), request.knowledge_rules):
+                omissions[place.place_id] = StructuredOmission(
+                    place_id=place.place_id,
+                    reason_code="visit_window",
+                    detail="An accepted high-authority closure rule blocks this visit date.",
+                )
+                continue
             incoming = haversine_meters(current_coordinate, place.coordinate)
-            return_distance = haversine_meters(place.coordinate, request.base.coordinate)
+            return_distance = haversine_meters(place.coordinate, local_origin)
             projected = walked + incoming + return_distance
             if projected > walking_limit:
                 omissions[place.place_id] = StructuredOmission(
@@ -381,7 +487,7 @@ def _plan_strategy(
             duration_seconds = incoming / 1.25
             visit_start = current_time + timedelta(seconds=duration_seconds)
             visit_end = visit_start + timedelta(minutes=request.visit_minutes)
-            if visit_end + timedelta(seconds=return_distance / 1.25) > window_end:
+            if visit_end + timedelta(seconds=return_distance / 1.25) > effective_window_end:
                 omissions[place.place_id] = StructuredOmission(
                     place_id=place.place_id,
                     reason_code="time_limit",
@@ -393,7 +499,7 @@ def _plan_strategy(
                     place_id=place.place_id,
                     area_id=next(
                         area.area_id
-                        for area in assignments[day_index]
+                        for area in request.areas
                         if place.place_id in area.place_ids
                     ),
                     sequence=len(visits),
@@ -407,7 +513,7 @@ def _plan_strategy(
             current_coordinate = place.coordinate
             current_time = visit_end
             walked += incoming
-        return_distance = haversine_meters(current_coordinate, request.base.coordinate)
+        return_distance = haversine_meters(current_coordinate, local_origin)
         total_walk = walked + (return_distance if visits else 0)
         days.append(
             ItineraryDay(
@@ -418,7 +524,11 @@ def _plan_strategy(
                 duration_minutes=max(
                     0,
                     round(
-                        ((current_time - window_start).total_seconds() + return_distance / 1.25)
+                        (
+                            (current_time - window_start).total_seconds()
+                            + return_distance / 1.25
+                            + transfer_seconds
+                        )
                         / 60
                     ),
                 ),

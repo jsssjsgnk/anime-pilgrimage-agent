@@ -19,9 +19,9 @@
 ## Operations
 
 - This is a local four-service Compose stack, not a deployed high-availability system. Authentication is represented by server-derived owner/trip inputs at the API boundary; a production identity provider is out of scope.
-- Continuous conversation retains the latest 50 normalized messages for the current trip. It answers from bounded workflow facts and can execute only the existing day-specific walking-reduction mutation; arbitrary requirement rewrites and silent critical confirmations remain intentionally unsupported.
+- Continuous conversation retains the latest 50 normalized messages for the current trip. It answers from bounded workspace facts and can propose validated PlanPatch operations; arbitrary requirement rewrites and silent critical confirmations remain intentionally unsupported.
 - PostgreSQL and BM25 use named volumes. The Phase 6 clean-start gate intentionally removes only these project volumes and recreates them.
-- Natural-language revision supports a validated day number and walking-reduction percentage, recomputes only that day, and preserves other days. It is not a general free-form plan-patch interpreter.
+- Natural-language revision recognizes a bounded set of date and walking-limit edits. The UI also proposes validated point inclusion/exclusion and local move/reorder patches. Unsupported prose stays conversational, and material patches require explicit confirmation.
 - The local Compose stack uses CPU-only PyTorch for real multilingual E5 retrieval. The model snapshot is downloaded separately and cached; an unavailable snapshot degrades retrieval to `insufficient_evidence` instead of fabricating guidance.
 - The production Web bundle is currently a single large Vite chunk. It is acceptable for the local demo but should be code-split before latency-sensitive deployment.
 - Accessibility is covered by semantic roles, keyboard-focus patterns, contrast, responsive layouts, and automated browser checks, but no external assistive-technology certification was performed.

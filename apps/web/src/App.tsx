@@ -22,6 +22,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createRouteMapOptions } from "./route-map-config";
+import { TripWorkspace } from "./workspace/TripWorkspace";
 
 interface Provenance {
   provider: string;
@@ -321,7 +322,7 @@ function RouteMap({ points, routeName }: { points: Point[]; routeName: "Route A"
   </div>;
 }
 
-export function App() {
+function LegacyWorkflow() {
   const queryClient = useQueryClient();
   const [request, setRequest] = useState("我从京都出发，九月去东京三天，想巡礼《孤独摇滚！》，预算中等，希望少走路。");
   const [submitted, setSubmitted] = useState(false);
@@ -622,4 +623,20 @@ export function App() {
       </section>}
     </main>
   </div>;
+}
+
+export function App() {
+  return (
+    <>
+      <TripWorkspace />
+      <section className="compatibility-shell" aria-labelledby="compatibility-title">
+        <header className="compatibility-heading">
+          <span>兼容视图</span>
+          <h2 id="compatibility-title">经典路线兼容流程</h2>
+          <p>为已有接口与回归用例暂时保留；新的多作品规划请使用上方工作区。</p>
+        </header>
+        <LegacyWorkflow />
+      </section>
+    </>
+  );
 }

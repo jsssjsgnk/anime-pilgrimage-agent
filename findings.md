@@ -258,3 +258,14 @@
 - Alembic `0004` adds all remediation persistence tables without modifying old migration history or `trips.state`. Both an existing database upgrade and a clean `0001→0004` upgrade passed; compatibility data remains readable.
 - The new Workspace Agent independently resolves up to three subject intents, requires per-intent catalog confirmation, isolates Provider failures, normalizes Anitabi points into scene evidence, and derives canonical places/areas before planning. Its default API projection exposes progressive counts while raw evidence requires the explicit evidence endpoint.
 - `/api/workspaces` is namespace-safe and state-versioned in the project trip store. It creates two independent hierarchical strategy versions and persists typed transition events; `/api/workflows` remains available but schema-v2 state is never silently parsed as a legacy workflow.
+
+### 2026-07-14 - Remediation implementation and acceptance are complete
+
+- The product path now supports one to three independent works, scene-evidence-to-place consolidation, shared-place appearances, stable Haversine DBSCAN areas, hierarchical area/day/place planning, typed Agent handoffs and bounded role contexts.
+- PlanPatch is the common preview/confirm/apply mutation boundary, with optimistic version checks, idempotency, persisted pending previews, structured diffs, and violation-specific bounded replanning.
+- Retrieved documents cannot directly mutate trip constraints. They can only create typed proposals; accepted, non-conflicting rules become deterministic planning inputs.
+- The primary Web experience is a responsive mixed-initiative workspace with persistent conversation, canonical-place map filters, itinerary versions, omissions, evidence counts, and a separately labelled legacy compatibility flow.
+- Real read-only Anitabi acceptance returned 119 scene records, resolved them to 96 canonical places and 28 areas, and scheduled 36 places over three days in the browser scenario.
+- The legacy Route B compatibility endpoint must use the same configured point Provider as Route A. Its matrix is deterministically bounded to 49 points and all remaining Route A points receive explicit omission reasons.
+- Final `make verify-all` passed in 652.4 seconds: 131 Python tests (80.41% coverage), 8 Web unit tests, all six historical phase gates, the clean four-service Compose stack, SQL/real-E5 RAG checks, desktop/mobile E2E, and remediation scenarios A-J.
+- Honest remaining limits: SearchAPI live quota is UNVERIFIED, area road-time correction falls back to labelled Haversine estimation without ORS, and local owner identity is not production authentication.

@@ -675,7 +675,8 @@ def write_final_verification(*, overall_verified: bool) -> None:
         "subsequent smoke is offline.",
         "- Anitabi may expose fewer documented detail records than `/lite` advertises; "
         "Route A remains explicitly partial and does not use undocumented scraping.",
-        "- Local modification is schema-bounded to a day and walking-reduction percentage.",
+        "- Workspace modification is bounded to validated PlanPatch operations; material "
+        "changes require explicit confirmation.",
         "- This is a local Compose service without a production identity provider or HA setup.",
         "- Complete details: `docs/KNOWN_LIMITATIONS.md`.",
         "",

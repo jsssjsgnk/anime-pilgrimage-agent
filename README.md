@@ -104,7 +104,7 @@ Current fixed-corpus RAG metrics are Recall@6 **0.929**, MRR@10 **0.952**, and C
 - The interactive MapLibre basemap uses the no-key OpenFreeMap Liberty style with OpenStreetMap data and visible attribution, so street tiles require an internet connection; the numbered markers and adjacent point list remain available if the basemap cannot load.
 - Flights, routes, weather, prices, opening/access rules, and photography rules are snapshots or estimates and must be reconfirmed before departure.
 - The MVP extracts text PDFs with pypdf but does not run OCR; scanned PDFs return `needs_ocr`.
-- Local natural-language modification is intentionally schema-bounded to a selected day plus a walking-reduction percentage; it is not a general arbitrary itinerary editor.
+- Workspace changes use validated PlanPatch operations for dates, daily walking limits, point inclusion/exclusion, and local move/reorder actions. Material changes require preview and explicit confirmation; arbitrary free-form mutations remain unsupported.
 - Conversation keeps the latest 50 normalized messages per trip. Recognized status, source, confirmation, weather, evidence, and local-change intents use deterministic handling; configured LLM synthesis is reserved for otherwise-general questions and cannot directly mutate the plan.
 - The real multilingual E5 snapshot must be downloaded once before offline verification; the Compose image includes CPU-only PyTorch, not CUDA, and model weights are not committed to Git.
 - This is a local portfolio implementation, not a deployed or multi-tenant production service.

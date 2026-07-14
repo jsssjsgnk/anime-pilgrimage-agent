@@ -260,5 +260,27 @@ FIXTURE_POINTS: dict[str, Any] = {
                 "source_url": "https://www.shimokita1ban.com/",
             },
         },
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [139.66844, 35.66215]},
+            "properties": {
+                "subject_id": "364450",
+                "name": "下北泽站东口",
+                "episode_refs": ["第3话"],
+                "confidence": "community",
+                "source_url": "https://www.odakyu.jp/station/shimo_kitazawa/",
+            },
+        },
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [139.70163, 35.68124]},
+            "properties": {
+                "subject_id": "364450",
+                "name": "锦糸公园周边",
+                "episode_refs": ["第5话"],
+                "confidence": "community",
+                "source_url": "https://www.city.sumida.lg.jp/",
+            },
+        },
     ],
 }

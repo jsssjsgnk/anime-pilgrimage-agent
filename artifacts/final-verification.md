@@ -1,6 +1,6 @@
 # Final verification
 
-Generated: 2026-07-14T09:08:32.630812+00:00
+Generated: 2026-07-14T14:42:26.804818+00:00
 Status: **PASS**
 
 ## Commands
@@ -34,7 +34,7 @@ Status: **PASS**
 - Scanned PDFs require external OCR; the MVP returns `needs_ocr`.
 - Initial official E5 model download is an operator prerequisite; subsequent smoke is offline.
 - Anitabi may expose fewer documented detail records than `/lite` advertises; Route A remains explicitly partial and does not use undocumented scraping.
-- Local modification is schema-bounded to a day and walking-reduction percentage.
+- Workspace modification is bounded to validated PlanPatch operations; material changes require explicit confirmation.
 - This is a local Compose service without a production identity provider or HA setup.
 - Complete details: `docs/KNOWN_LIMITATIONS.md`.
 

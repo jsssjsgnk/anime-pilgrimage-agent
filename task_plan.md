@@ -107,14 +107,14 @@ Phase 14 in progress — authoritative remediation audit and implementation
 
 ### Phase 14: Authoritative remediation audit and implementation
 - [x] Safely extract and fully read the five required remediation documents plus the required historical context
-- [ ] Map every remediation requirement and acceptance scenario to current code/tests (in progress)
-- [ ] Define the new architecture and implementation order without treating old gates as sufficient (in progress)
+- [x] Map every remediation requirement and acceptance scenario to current code/tests
+- [x] Define the new architecture and implementation order without treating old gates as sufficient
 - [x] Implement multi-work support, scene/location consolidation, real clustering, and hierarchical planning
-- [ ] Implement structured Agent communication, context engineering, PlanPatch, and RAG constraint closure
-- [ ] Replace the wizard-like Web flow with a freer workspace while retaining compatible Route views
-- [ ] Add remediation-specific unit/contract/API/Compose/browser gates and fix all failures
-- [ ] Re-run legacy regression gates plus the new remediation acceptance and publish honest reports
-- **Status:** in progress
+- [x] Implement structured Agent communication, context engineering, PlanPatch, and RAG constraint closure
+- [x] Replace the wizard-like Web flow with a freer workspace while retaining compatible Route views
+- [x] Add remediation-specific unit/contract/API/Compose/browser gates and fix all failures
+- [x] Re-run legacy regression gates plus the new remediation acceptance and publish honest reports
+- **Status:** complete (`make verify-all` PASS, including remediation A-J)
 
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
@@ -219,6 +219,12 @@ Phase 14 in progress — authoritative remediation audit and implementation
 | A focused command accidentally passed the TypeScript Playwright spec to Python Ruff | 1 | Ignore the irrelevant parser output and use the existing ESLint/TypeScript gates for Web files |
 | Phase-gate inspection attempted a nonexistent phase-specific script filename | 1 | Read the actual centralized `scripts/gate.py` definitions instead |
 | Optional in-app Browser bootstrap again failed before creating `agent` with `Cannot redefine property: process` | 3 | Stop retrying and retain the passing repository Playwright desktop/mobile acceptance as visual evidence |
+| Full remediation browser acceptance exposed base-to-every-point distance being charged as daily walking, leaving only one visit | 1 | Separate inter-area access time from area-local walking; the real three-day workspace now schedules 36 of 96 canonical places |
+| A structured omission used an invalid `access_limit` enum value | 1 | Use the existing truthful `unreachable` code and add focused coverage |
+| Reloading a pending date PlanPatch failed because persisted ISO text selected the string union branch | 1 | Normalize persisted start/end date values before PlanPatch validation and add reload coverage |
+| First aggregate remediation run found the compatibility heading exposed `Route A` before subject confirmation | 1 | Rename the compatibility section while retaining the confirmed Route A heading; desktop/mobile Phase 2 E2E passed |
+| Second aggregate remediation run found legacy Route B used fixture IDs while Route A used live Anitabi IDs | 1 | Make Route B use the configured point Provider, bound its matrix candidates to 49, and restore explicit omissions for the full Route A set |
+| The initial final aggregate command used the system Python instead of the authorized environment | 1 | Prepend the authorized Conda environment and its Library/bin directory before running the canonical gate |
 
 ## Guardrails
 - Never expose `.env`, secrets, tokens, headers, cookies, or signed MCP URLs.

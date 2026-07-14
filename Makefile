@@ -1,5 +1,6 @@
 .PHONY: bootstrap bootstrap-conda verify-env dev dev-infra compose-up compose-down lint typecheck test \
-	verify-phase-1 verify-phase-2 verify-phase-3 verify-phase-4 verify-phase-5 verify-phase-6 verify-all
+	verify-phase-1 verify-phase-2 verify-phase-3 verify-phase-4 verify-phase-5 verify-phase-6 \
+	verify-remediation verify-all
 
 PYTHON ?= python
 UV ?= uv
@@ -58,5 +59,9 @@ verify-phase-5:
 verify-phase-6:
 	$(PYTHON) scripts/gate.py 6
 
+verify-remediation:
+	$(PYTHON) scripts/remediation_acceptance.py
+
 verify-all:
 	$(PYTHON) scripts/gate.py all
+	$(PYTHON) scripts/remediation_acceptance.py

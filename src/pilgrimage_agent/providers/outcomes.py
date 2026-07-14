@@ -74,6 +74,13 @@ async def invoke_tool[T: BaseModel](
             status=ToolOutcomeStatus.UNAVAILABLE,
             safe_warning=f"{name} is currently unavailable; no result was invented.",
         )
+    except Exception:
+        # Third-party MCP adapters use their own exception classes. Normalize the
+        # boundary without copying raw tool content, headers, or upstream details.
+        return ToolOutcome(
+            status=ToolOutcomeStatus.UNAVAILABLE,
+            safe_warning=f"{name} is currently unavailable; no result was invented.",
+        )
     provenance = getattr(value, "provenance", None)
     return ToolOutcome(
         status=ToolOutcomeStatus.OK,

@@ -178,6 +178,21 @@ class FixtureBangumiSubjectProvider:
             aliases=("Bocchi the Rock!",),
             provenance=prov,
         )
+        lycoris_provenance = provenance(
+            self.provider,
+            "https://bgm.tv/subject/364450",
+            ttl=timedelta(days=365),
+        )
+        self.subjects = {
+            self.subject.subject_id: self.subject,
+            "364450": ConfirmedSubject(
+                subject_id="364450",
+                name="Lycoris Recoil",
+                name_cn="莉可丽丝",
+                aliases=("Lycoris Recoil",),
+                provenance=lycoris_provenance,
+            ),
+        }
 
     async def fetch(self, query: SubjectSearchQuery) -> SubjectSearchResult:
         candidates: tuple[SubjectCandidate, ...] = ()
@@ -190,16 +205,25 @@ class FixtureBangumiSubjectProvider:
                     provenance=self.subject.provenance,
                 ),
             )
+        elif any(term in normalized for term in ("莉可丽丝", "lycoris")):
+            subject = self.subjects["364450"]
+            candidates = (
+                SubjectCandidate(
+                    **subject.model_dump(exclude={"provenance"}),
+                    score=8.2,
+                    provenance=subject.provenance,
+                ),
+            )
         return SubjectSearchResult(
             candidates=candidates[: query.limit],
             provenance=self.subject.provenance,
         )
 
     async def get_subject(self, subject_id: str) -> ConfirmedSubject:
-        if subject_id != self.subject.subject_id:
+        if subject_id not in self.subjects:
             raise ProviderError(
                 ProviderErrorKind.NOT_FOUND,
                 self.provider,
                 "The fixture subject was not found.",
             )
-        return self.subject
+        return self.subjects[subject_id]

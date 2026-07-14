@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import Field, model_validator
 
+from pilgrimage_agent.agent.context import RoleContextBuilder
 from pilgrimage_agent.agent.llm import DeterministicRequirementExtractor, RequirementExtractor
 from pilgrimage_agent.agent.mcp_client import AgentToolClient
 from pilgrimage_agent.curation.resolution import evidence_from_point, resolve_places
@@ -32,12 +33,23 @@ from pilgrimage_agent.domain.workspace import (
     AgentRole,
     AmbiguousPlaceMerge,
     AreaCluster,
+    DerivedKnowledgeRule,
     EntityRef,
     EvidenceQuarantine,
+    ImpactAnalysis,
     ItineraryVersion,
+    KnowledgeOperation,
+    PlaceOperation,
+    PlaceResolutionOverride,
     PlanningStrategy,
+    PlanPatch,
+    PlanVersionDiff,
+    RoleContext,
     SceneEvidence,
+    SelectionOperation,
+    SubjectIntentOperation,
     TripCandidateGraph,
+    UpdateRequirementOperation,
     VisitPlace,
 )
 from pilgrimage_agent.planning.areas import cluster_places
@@ -45,6 +57,11 @@ from pilgrimage_agent.planning.geo import haversine_meters
 from pilgrimage_agent.planning.hierarchical import (
     HierarchicalPlanningRequest,
     plan_hierarchical_itineraries,
+)
+from pilgrimage_agent.planning.patches import (
+    PlanPatchPreview,
+    analyze_impact,
+    normalize_patch,
 )
 from pilgrimage_agent.providers.outcomes import invoke_tool
 
@@ -138,12 +155,31 @@ class WorkspaceState(StrictModel):
     evidence: tuple[SceneEvidence, ...] = ()
     quarantined: tuple[EvidenceQuarantine, ...] = ()
     ambiguous_merges: tuple[AmbiguousPlaceMerge, ...] = ()
+    resolution_overrides: tuple[PlaceResolutionOverride, ...] = ()
     places: tuple[VisitPlace, ...] = ()
     areas: tuple[AreaCluster, ...] = ()
     base_candidates: tuple[BaseCandidate, ...] = ()
+    selected_base_id: str | None = None
+    selected_access: AccessSelection | None = None
+    planning_strategies: tuple[PlanningStrategy, ...] = (
+        PlanningStrategy.PRIMARY_SUBJECT_FIRST,
+        PlanningStrategy.LOW_WALKING,
+    )
+    must_visit_place_ids: frozenset[UUID] = frozenset()
+    excluded_place_ids: frozenset[UUID] = frozenset()
+    fixed_day_assignments: dict[UUID, int] = Field(default_factory=dict)
+    fixed_positions: dict[UUID, int] = Field(default_factory=dict)
+    attached_knowledge_ids: frozenset[UUID] = frozenset()
+    knowledge_rules: tuple[DerivedKnowledgeRule, ...] = ()
+    knowledge_evidence_documents: dict[str, UUID] = Field(default_factory=dict)
     candidate_graph: TripCandidateGraph | None = None
     itineraries: tuple[ItineraryVersion, ...] = ()
     handoffs: tuple[AgentHandoff, ...] = ()
+    contexts: tuple[RoleContext, ...] = ()
+    patches: tuple[PlanPatch, ...] = ()
+    impacts: tuple[ImpactAnalysis, ...] = ()
+    diffs: tuple[PlanVersionDiff, ...] = ()
+    pending_patch_id: UUID | None = None
     warnings: tuple[str, ...] = ()
 
 
@@ -159,9 +195,19 @@ class WorkspaceView(StrictModel):
     places: tuple[VisitPlace, ...]
     areas: tuple[AreaCluster, ...]
     base_candidates: tuple[BaseCandidate, ...]
+    selected_base_id: str | None
+    planning_strategies: tuple[PlanningStrategy, ...]
+    must_visit_place_ids: frozenset[UUID]
+    excluded_place_ids: frozenset[UUID]
     candidate_graph: TripCandidateGraph | None
     itineraries: tuple[ItineraryVersion, ...]
     handoffs: tuple[AgentHandoff, ...]
+    contexts: tuple[RoleContext, ...]
+    patches: tuple[PlanPatch, ...]
+    impacts: tuple[ImpactAnalysis, ...]
+    diffs: tuple[PlanVersionDiff, ...]
+    pending_patch_id: UUID | None
+    knowledge_rules: tuple[DerivedKnowledgeRule, ...]
     counts: WorkspaceCounts
     warnings: tuple[str, ...]
 
@@ -171,6 +217,11 @@ class WorkspaceEvidenceView(StrictModel):
     evidence: tuple[SceneEvidence, ...]
     quarantined: tuple[EvidenceQuarantine, ...]
     ambiguous_merges: tuple[AmbiguousPlaceMerge, ...]
+
+
+class WorkspacePatchPreview(StrictModel):
+    workspace: WorkspaceView
+    preview: PlanPatchPreview
 
 
 def workspace_view(state: WorkspaceState) -> WorkspaceView:
@@ -204,9 +255,19 @@ def workspace_view(state: WorkspaceState) -> WorkspaceView:
         places=state.places,
         areas=state.areas,
         base_candidates=state.base_candidates,
+        selected_base_id=state.selected_base_id,
+        planning_strategies=state.planning_strategies,
+        must_visit_place_ids=state.must_visit_place_ids,
+        excluded_place_ids=state.excluded_place_ids,
         candidate_graph=state.candidate_graph,
         itineraries=state.itineraries,
         handoffs=state.handoffs,
+        contexts=state.contexts,
+        patches=state.patches,
+        impacts=state.impacts,
+        diffs=state.diffs,
+        pending_patch_id=state.pending_patch_id,
+        knowledge_rules=state.knowledge_rules,
         counts=WorkspaceCounts(
             raw_scene_records=len(state.evidence),
             quarantined_records=len(state.quarantined),
@@ -320,6 +381,7 @@ class WorkspaceAgent:
     ) -> None:
         self.tools = tool_client
         self.extractor = requirement_extractor or DeterministicRequirementExtractor()
+        self.context_builder = RoleContextBuilder()
 
     async def start(self, request: WorkspaceStartRequest) -> WorkspaceState:
         extracted = (
@@ -470,7 +532,10 @@ class WorkspaceAgent:
                 evidence_status = "unavailable"
                 warnings.append(f"{intent.query}: {point_warning}")
             else:
-                evidence.extend(evidence_from_point(item) for item in point_outcome.value.points)
+                evidence.extend(
+                    evidence_from_point(item, trip_id=state.trip_id)
+                    for item in point_outcome.value.points
+                )
                 point_warning = "; ".join(point_outcome.value.warnings) or None
                 evidence_status = (
                     "ok" if point_outcome.value.is_complete else "partial"
@@ -556,21 +621,24 @@ class WorkspaceAgent:
             }
         )
 
-    def plan(self, state: WorkspaceState, request: PlanWorkspaceRequest) -> WorkspaceState:
-        if (request.owner_user_id, request.thread_id) != (
-            state.owner_user_id,
-            state.thread_id,
-        ):
-            raise ValueError("workspace namespace mismatch")
-        if request.expected_state_version != state.state_version:
-            raise ValueError("workspace state version conflict")
+    def _execute_plan(
+        self,
+        state: WorkspaceState,
+        *,
+        base_id: str,
+        access: AccessSelection | None,
+        timezone: str | None,
+        strategies: tuple[PlanningStrategy, ...],
+        next_version: int,
+        patch_id: UUID | None = None,
+    ) -> WorkspaceState:
         if not state.places or not state.areas:
             raise ValueError("workspace has no canonical places to plan")
         by_base = {item.base_id: item for item in state.base_candidates}
-        if request.base_id not in by_base:
+        if base_id not in by_base:
             raise ValueError("selected base must belong to the workspace candidates")
-        base = by_base[request.base_id]
-        timezone = request.timezone or _derived_timezone(base.coordinate)
+        base = by_base[base_id]
+        selected_timezone = timezone or _derived_timezone(base.coordinate)
         run_id = uuid4()
         result = plan_hierarchical_itineraries(
             HierarchicalPlanningRequest(
@@ -579,14 +647,45 @@ class WorkspaceAgent:
                 places=state.places,
                 areas=state.areas,
                 base=base,
-                access=request.access,
-                timezone=timezone,
-                strategies=request.strategies,
-                must_visit_place_ids=request.must_visit_place_ids,
-                excluded_place_ids=request.excluded_place_ids,
-                graph_version=state.state_version,
-                itinerary_version=1,
+                access=access,
+                timezone=selected_timezone,
+                strategies=strategies,
+                must_visit_place_ids=state.must_visit_place_ids,
+                excluded_place_ids=state.excluded_place_ids,
+                graph_version=next_version,
+                itinerary_version=next_version,
+                fixed_day_assignments=state.fixed_day_assignments,
+                fixed_positions=state.fixed_positions,
+                knowledge_rules=state.knowledge_rules,
             )
+        )
+        parent_by_strategy = {
+            strategy: max(
+                item.version for item in state.itineraries if item.strategy == strategy
+            )
+            for strategy in {item.strategy for item in state.itineraries}
+        }
+        new_itineraries = tuple(
+            item.model_copy(
+                update={
+                    "parent_version": parent_by_strategy.get(item.strategy),
+                    "applied_patch_id": patch_id,
+                }
+            )
+            for item in result.itineraries
+        )
+        priority_summary = tuple(
+            f"{item.query}:priority={item.priority}:minimum={item.minimum_place_count}"
+            for item in state.requirements.subject_intents
+        )
+        contexts = tuple(
+            self.context_builder.reviewer(
+                run_id=run_id,
+                itinerary=item,
+                user_priorities=priority_summary,
+                evidence_status=result.candidate_graph.evidence_status,
+            )
+            for item in new_itineraries
         )
         handoffs = (
             *state.handoffs,
@@ -604,7 +703,7 @@ class WorkspaceAgent:
                 output_schema="ItineraryVersion[]",
                 result_refs=tuple(
                     _ref("itinerary", item.itinerary_id, item.version)
-                    for item in result.itineraries
+                    for item in new_itineraries
                 ),
             ),
             _handoff(
@@ -615,26 +714,473 @@ class WorkspaceAgent:
                 goal="Validate membership, coverage, walking, time and omissions.",
                 input_refs=tuple(
                     _ref("itinerary", item.itinerary_id, item.version)
-                    for item in result.itineraries
+                    for item in new_itineraries
                 ),
                 output_schema="ValidationIssue[]",
                 result_refs=tuple(
                     _ref("itinerary", item.itinerary_id, item.version)
-                    for item in result.itineraries
+                    for item in new_itineraries
                 ),
                 warning=(
                     "One or more strategy versions retain deterministic violations."
-                    if any(item.validation_issues for item in result.itineraries)
+                    if any(item.validation_issues for item in new_itineraries)
                     else None
+                ),
+            ),
+            _handoff(
+                run_id=run_id,
+                sender=AgentRole.VALIDATOR,
+                receiver=AgentRole.REVIEWER,
+                task_type="review_normalized_plan_quality",
+                goal="Review coverage, omissions and priorities without overriding validation.",
+                input_refs=tuple(
+                    _ref("role_context", item.context_id) for item in contexts
+                ),
+                output_schema="ReviewerAssessment",
+                result_refs=tuple(
+                    _ref("itinerary", item.itinerary_id, item.version)
+                    for item in new_itineraries
                 ),
             ),
         )
         return state.model_copy(
             update={
-                "state_version": state.state_version + 1,
-                "status": WorkspaceStatus.PLANNED,
+                "state_version": next_version,
+                "status": (
+                    WorkspaceStatus.PARTIAL
+                    if any(item.validation_issues for item in new_itineraries)
+                    else WorkspaceStatus.PLANNED
+                ),
+                "selected_base_id": base_id,
+                "selected_access": access,
+                "planning_strategies": strategies,
                 "candidate_graph": result.candidate_graph,
-                "itineraries": result.itineraries,
+                "itineraries": (*new_itineraries, *state.itineraries),
                 "handoffs": handoffs,
+                "contexts": (*state.contexts, *contexts),
+            }
+        )
+
+    def plan(self, state: WorkspaceState, request: PlanWorkspaceRequest) -> WorkspaceState:
+        if (request.owner_user_id, request.thread_id) != (
+            state.owner_user_id,
+            state.thread_id,
+        ):
+            raise ValueError("workspace namespace mismatch")
+        if request.expected_state_version != state.state_version:
+            raise ValueError("workspace state version conflict")
+        prepared = state.model_copy(
+            update={
+                "must_visit_place_ids": request.must_visit_place_ids,
+                "excluded_place_ids": request.excluded_place_ids,
+            }
+        )
+        return self._execute_plan(
+            prepared,
+            base_id=request.base_id,
+            access=request.access,
+            timezone=request.timezone,
+            strategies=request.strategies,
+            next_version=state.state_version + 1,
+        )
+
+    def propose_patch(
+        self, state: WorkspaceState, patch: PlanPatch
+    ) -> tuple[WorkspaceState, PlanPatchPreview]:
+        if patch.trip_id != state.trip_id:
+            raise ValueError("patch trip does not match the workspace")
+        existing = next(
+            (item for item in state.patches if item.idempotency_key == patch.idempotency_key),
+            None,
+        )
+        if existing is not None:
+            impact = next(item for item in state.impacts if item.patch_id == existing.patch_id)
+            return state, PlanPatchPreview(patch=existing, impact=impact)
+        if patch.expected_base_version != state.state_version:
+            raise ValueError("workspace state version conflict")
+        normalized = normalize_patch(patch)
+        impact = analyze_impact(normalized)
+        updated = state.model_copy(
+            update={
+                "patches": (*state.patches, normalized),
+                "impacts": (*state.impacts, impact),
+                "pending_patch_id": normalized.patch_id,
+            }
+        )
+        return updated, PlanPatchPreview(patch=normalized, impact=impact)
+
+    async def apply_patch(
+        self,
+        state: WorkspaceState,
+        patch_id: UUID,
+        *,
+        confirm: bool,
+    ) -> WorkspaceState:
+        patch = next((item for item in state.patches if item.patch_id == patch_id), None)
+        if patch is None:
+            raise ValueError("patch was not found in this workspace")
+        if patch.status == "applied":
+            return state
+        if patch.expected_base_version != state.state_version:
+            raise ValueError("workspace state version conflict")
+        if patch.requires_confirmation and not confirm:
+            raise ValueError("material patch requires explicit confirmation")
+        impact = next(item for item in state.impacts if item.patch_id == patch.patch_id)
+        requirements_data = state.requirements.model_dump(mode="python")
+        intents = list(state.requirements.subject_intents)
+        groups = list(state.subject_groups)
+        confirmed = list(state.confirmed_subjects)
+        evidence = list(state.evidence)
+        overrides = list(state.resolution_overrides)
+        must_visit = set(state.must_visit_place_ids)
+        excluded = set(state.excluded_place_ids)
+        fixed_days = dict(state.fixed_day_assignments)
+        fixed_positions = dict(state.fixed_positions)
+        attached_knowledge = set(state.attached_knowledge_ids)
+        selected_base_id = state.selected_base_id
+        selected_access = state.selected_access
+        strategies = list(state.planning_strategies)
+        changed_requirements: set[str] = set()
+        changed_intents: set[UUID] = set()
+        changed_places: set[UUID] = set()
+        changed_days: set[int] = set()
+        changed_access = False
+        changed_base = False
+        changed_strategy = False
+        recurate = False
+        added_unconfirmed = False
+        original_start = state.requirements.start_date
+        original_end = state.requirements.end_date
+        explicit_end_change = any(
+            isinstance(item, UpdateRequirementOperation) and item.field == "end_date"
+            for item in patch.operations
+        )
+        for operation in patch.operations:
+            if isinstance(operation, UpdateRequirementOperation):
+                requirements_data[operation.field] = operation.value
+                changed_requirements.add(operation.field)
+                if (
+                    operation.field == "start_date"
+                    and isinstance(operation.value, date)
+                    and original_start is not None
+                    and original_end is not None
+                    and not explicit_end_change
+                ):
+                    requirements_data["end_date"] = operation.value + (
+                        original_end - original_start
+                    )
+                    changed_requirements.add("end_date")
+            elif isinstance(operation, SubjectIntentOperation):
+                if operation.action == "add":
+                    assert operation.intent is not None
+                    if len(intents) >= 3:
+                        raise ValueError("a workspace supports at most three subjects")
+                    if any(item.query == operation.intent.query for item in intents):
+                        raise ValueError("subject intent already exists")
+                    intents.append(operation.intent)
+                    changed_intents.add(operation.intent.intent_id)
+                    outcome = await invoke_tool(
+                        self.tools,
+                        "search_anime_subjects",
+                        {"query": operation.intent.query, "limit": 5},
+                        SubjectSearchResult,
+                    )
+                    groups.append(
+                        SubjectCandidateGroup(
+                            intent=operation.intent,
+                            candidates=outcome.value.candidates if outcome.value else (),
+                            status=(
+                                "ok"
+                                if outcome.value and outcome.value.candidates
+                                else "not_found"
+                                if outcome.value
+                                else "unavailable"
+                            ),
+                            warning=outcome.safe_warning,
+                        )
+                    )
+                    added_unconfirmed = True
+                else:
+                    assert operation.intent_id is not None
+                    index = next(
+                        (
+                            index
+                            for index, item in enumerate(intents)
+                            if item.intent_id == operation.intent_id
+                        ),
+                        None,
+                    )
+                    if index is None:
+                        raise ValueError("subject intent does not belong to the workspace")
+                    current_intent = intents[index]
+                    changed_intents.add(current_intent.intent_id)
+                    if operation.action == "remove":
+                        if len(intents) == 1:
+                            raise ValueError("a workspace must retain at least one subject")
+                        intents.pop(index)
+                        groups = [
+                            item
+                            for item in groups
+                            if item.intent.intent_id != current_intent.intent_id
+                        ]
+                        confirmed = [
+                            item
+                            for item in confirmed
+                            if item.intent_id != current_intent.intent_id
+                        ]
+                        if current_intent.confirmed_subject_id:
+                            evidence = [
+                                item
+                                for item in evidence
+                                if item.subject_id != current_intent.confirmed_subject_id
+                            ]
+                            recurate = True
+                    elif operation.action == "reprioritize":
+                        intents[index] = current_intent.model_copy(
+                            update={"priority": operation.priority}
+                        )
+                    elif operation.action == "reject":
+                        intents[index] = current_intent.model_copy(
+                            update={"status": "rejected", "confirmed_subject_id": None}
+                        )
+                    else:
+                        raise ValueError(
+                            "subject confirmation uses the candidate confirmation endpoint"
+                        )
+            elif isinstance(operation, PlaceOperation):
+                if operation.place_id not in {item.place_id for item in state.places}:
+                    raise ValueError("place does not belong to the workspace")
+                changed_places.add(operation.place_id)
+                if operation.action == "include":
+                    excluded.discard(operation.place_id)
+                elif operation.action == "exclude":
+                    excluded.add(operation.place_id)
+                    must_visit.discard(operation.place_id)
+                elif operation.action == "move_day":
+                    assert operation.target_day is not None
+                    fixed_days[operation.place_id] = operation.target_day
+                    changed_days.add(operation.target_day)
+                else:
+                    assert operation.target_day is not None
+                    assert operation.target_position is not None
+                    fixed_days[operation.place_id] = operation.target_day
+                    fixed_positions[operation.place_id] = operation.target_position
+                    changed_days.add(operation.target_day)
+            elif isinstance(operation, SelectionOperation):
+                if operation.action == "change_base":
+                    assert operation.selection_id is not None
+                    if operation.selection_id not in {
+                        item.base_id for item in state.base_candidates
+                    }:
+                        raise ValueError("base candidate does not belong to the workspace")
+                    selected_base_id = operation.selection_id
+                    changed_base = True
+                elif operation.action == "change_access":
+                    if operation.selection_id != "clear":
+                        raise ValueError(
+                            "only the explicit clear access selection is currently available"
+                        )
+                    selected_access = None
+                    changed_access = True
+                elif operation.action == "change_strategy":
+                    assert operation.strategy is not None
+                    alternatives = [
+                        operation.strategy,
+                        *(
+                            item
+                            for item in strategies
+                            if item is not operation.strategy
+                        ),
+                    ]
+                    strategies = alternatives[: max(2, len(strategies))]
+                    if len(strategies) == 1:
+                        strategies.append(PlanningStrategy.BALANCED)
+                    changed_strategy = True
+                else:
+                    changed_strategy = True
+            elif isinstance(operation, KnowledgeOperation):
+                if operation.action == "attach":
+                    attached_knowledge.add(operation.document_id)
+                else:
+                    attached_knowledge.discard(operation.document_id)
+            else:
+                action = "merge" if operation.action == "accept_merge" else "split"
+                evidence_ids = {item.evidence_id for item in evidence}
+                if not set(operation.evidence_ids).issubset(evidence_ids):
+                    raise ValueError("merge decision references unknown evidence")
+                overrides.append(
+                    PlaceResolutionOverride(
+                        action=action,
+                        evidence_ids=operation.evidence_ids,
+                        reason=patch.rationale,
+                        created_at=datetime.now(UTC),
+                    )
+                )
+                recurate = True
+
+        if intents and not any(item.is_primary for item in intents):
+            selected_primary = max(intents, key=lambda item: (item.priority, str(item.intent_id)))
+            intents = [
+                item.model_copy(update={"is_primary": item.intent_id == selected_primary.intent_id})
+                for item in intents
+            ]
+        requirements_data["subject_intents"] = tuple(intents)
+        requirements_data["anime_query"] = next(
+            item.query for item in intents if item.is_primary
+        )
+        requirements = TripRequest.model_validate(requirements_data)
+        places = state.places
+        areas = state.areas
+        quarantined = state.quarantined
+        ambiguous = state.ambiguous_merges
+        bases = state.base_candidates
+        if recurate:
+            resolution = resolve_places(evidence, overrides=tuple(overrides))
+            places = resolution.places
+            quarantined = resolution.quarantined
+            ambiguous = resolution.ambiguous_merges
+            areas = cluster_places(places) if places else ()
+            bases = (_estimated_base(places),) if places else ()
+            if selected_base_id not in {item.base_id for item in bases}:
+                selected_base_id = bases[0].base_id if bases else None
+                changed_base = True
+            current_place_ids = {item.place_id for item in places}
+            must_visit.intersection_update(current_place_ids)
+            excluded.intersection_update(current_place_ids)
+            fixed_days = {
+                key: value for key, value in fixed_days.items() if key in current_place_ids
+            }
+            fixed_positions = {
+                key: value
+                for key, value in fixed_positions.items()
+                if key in current_place_ids
+            }
+        applied_patch = patch.model_copy(update={"status": "applied"})
+        patches = tuple(
+            applied_patch if item.patch_id == patch.patch_id else item
+            for item in state.patches
+        )
+        working = state.model_copy(
+            update={
+                "requirements": requirements,
+                "subject_groups": tuple(groups),
+                "confirmed_subjects": tuple(confirmed),
+                "evidence": tuple(evidence),
+                "resolution_overrides": tuple(overrides),
+                "places": places,
+                "areas": areas,
+                "quarantined": quarantined,
+                "ambiguous_merges": ambiguous,
+                "base_candidates": bases,
+                "selected_base_id": selected_base_id,
+                "selected_access": selected_access,
+                "planning_strategies": tuple(dict.fromkeys(strategies)),
+                "must_visit_place_ids": frozenset(must_visit),
+                "excluded_place_ids": frozenset(excluded),
+                "fixed_day_assignments": fixed_days,
+                "fixed_positions": fixed_positions,
+                "attached_knowledge_ids": frozenset(attached_knowledge),
+                "patches": patches,
+                "pending_patch_id": None,
+            }
+        )
+        before_codes = tuple(
+            sorted(
+                {
+                    issue.code
+                    for itinerary in state.itineraries
+                    for issue in itinerary.validation_issues
+                }
+            )
+        )
+        can_plan = bool(
+            state.itineraries
+            and places
+            and areas
+            and selected_base_id
+            and requirements.start_date
+            and requirements.end_date
+            and not added_unconfirmed
+        )
+        if can_plan:
+            assert selected_base_id is not None
+            updated = self._execute_plan(
+                working,
+                base_id=selected_base_id,
+                access=selected_access,
+                timezone=(state.itineraries[0].timezone if state.itineraries else None),
+                strategies=tuple(dict.fromkeys(strategies)),
+                next_version=state.state_version + 1,
+                patch_id=patch.patch_id,
+            )
+        else:
+            updated = working.model_copy(
+                update={
+                    "state_version": state.state_version + 1,
+                    "status": (
+                        WorkspaceStatus.AWAITING_SUBJECTS
+                        if added_unconfirmed
+                        else WorkspaceStatus.PARTIAL
+                    ),
+                    "candidate_graph": (
+                        None
+                        if recurate or added_unconfirmed
+                        else state.candidate_graph
+                    ),
+                    "itineraries": () if recurate or added_unconfirmed else state.itineraries,
+                }
+            )
+        after_codes = tuple(
+            sorted(
+                {
+                    issue.code
+                    for itinerary in updated.itineraries
+                    for issue in itinerary.validation_issues
+                }
+            )
+        )
+        diff = PlanVersionDiff(
+            from_version=state.state_version,
+            to_version=updated.state_version,
+            changed_requirements=tuple(sorted(changed_requirements)),
+            changed_subject_intents=tuple(sorted(changed_intents, key=str)),
+            changed_place_ids=tuple(sorted(changed_places, key=str)),
+            changed_day_numbers=tuple(sorted(changed_days)),
+            changed_access=changed_access,
+            changed_base=changed_base,
+            changed_strategy=changed_strategy,
+            validation_before=before_codes,
+            validation_after=after_codes,
+        )
+        run_id = uuid4()
+        replan_context = self.context_builder.replanner(
+            run_id=run_id,
+            patch=patch,
+            impact=impact,
+            validation_before=before_codes,
+            validation_after=after_codes,
+        )
+        return updated.model_copy(
+            update={
+                "diffs": (*state.diffs, diff),
+                "contexts": (*updated.contexts, replan_context),
+                "handoffs": (
+                    *updated.handoffs,
+                    _handoff(
+                        run_id=run_id,
+                        sender=AgentRole.REPLANNER,
+                        receiver=AgentRole.VALIDATOR,
+                        task_type="apply_patch_and_revalidate",
+                        goal="Apply the confirmed patch and retain deterministic violations.",
+                        input_refs=(_ref("patch", patch.patch_id),),
+                        output_schema="PlanVersionDiff + ValidationIssue[]",
+                        result_refs=(_ref("state", state.trip_id, updated.state_version),),
+                        warning=(
+                            "Deterministic violations remain visible after replanning."
+                            if after_codes
+                            else None
+                        ),
+                    ),
+                ),
             }
         )

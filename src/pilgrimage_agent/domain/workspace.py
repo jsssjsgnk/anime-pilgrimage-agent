@@ -284,7 +284,58 @@ class UpdateRequirementOperation(StrictModel):
         "walking_preference",
         "max_walking_meters_per_day",
     ]
-    value: str | date | float | None
+    value: date | float | str | None
+
+    @model_validator(mode="before")
+    @classmethod
+    def restore_persisted_date(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        if value.get("field") not in {"start_date", "end_date"}:
+            return value
+        raw_value = value.get("value")
+        if not isinstance(raw_value, str):
+            return value
+        restored = dict(value)
+        try:
+            restored["value"] = date.fromisoformat(raw_value)
+        except ValueError:
+            return value
+        return restored
+
+    @model_validator(mode="after")
+    def value_matches_field(self) -> UpdateRequirementOperation:
+        if self.field in {"origin", "destination"} and not (
+            self.value is None or isinstance(self.value, str)
+        ):
+            raise ValueError("text requirements accept only text or null")
+        if self.field in {"start_date", "end_date"} and not (
+            self.value is None or isinstance(self.value, date)
+        ):
+            raise ValueError("date requirements accept only ISO dates or null")
+        if self.field == "budget_level" and self.value not in {
+            None,
+            "low",
+            "medium",
+            "high",
+        }:
+            raise ValueError("budget level must be low, medium, high or null")
+        if self.field == "walking_preference" and self.value not in {
+            None,
+            "low",
+            "medium",
+            "high",
+        }:
+            raise ValueError("walking preference must be low, medium, high or null")
+        if self.field == "max_walking_meters_per_day" and not (
+            self.value is None
+            or (
+                isinstance(self.value, (int, float))
+                and 0 < float(self.value) <= 50_000
+            )
+        ):
+            raise ValueError("walking distance must be in (0, 50000] or null")
+        return self
 
 
 class SubjectIntentOperation(StrictModel):
@@ -295,6 +346,22 @@ class SubjectIntentOperation(StrictModel):
     priority: int | None = Field(default=None, ge=1, le=5)
     confirmed_subject_id: str | None = Field(default=None, max_length=50)
 
+    @model_validator(mode="after")
+    def fields_match_action(self) -> SubjectIntentOperation:
+        if self.action == "add":
+            if self.intent is None or any(
+                item is not None
+                for item in (self.intent_id, self.priority, self.confirmed_subject_id)
+            ):
+                raise ValueError("adding a subject requires only a new intent")
+        elif self.intent_id is None or self.intent is not None:
+            raise ValueError("subject changes require an existing intent ID")
+        if self.action == "reprioritize" and self.priority is None:
+            raise ValueError("reprioritizing requires a priority")
+        if self.action == "confirm" and self.confirmed_subject_id is None:
+            raise ValueError("confirming requires a catalog subject ID")
+        return self
+
 
 class PlaceOperation(StrictModel):
     op: Literal["place"] = "place"
@@ -303,12 +370,38 @@ class PlaceOperation(StrictModel):
     target_day: int | None = Field(default=None, ge=1, le=30)
     target_position: int | None = Field(default=None, ge=0, le=100)
 
+    @model_validator(mode="after")
+    def target_matches_action(self) -> PlaceOperation:
+        if self.action == "move_day" and self.target_day is None:
+            raise ValueError("moving a place requires a target day")
+        if self.action == "reorder" and (
+            self.target_day is None or self.target_position is None
+        ):
+            raise ValueError("reordering requires a target day and position")
+        if self.action in {"include", "exclude"} and (
+            self.target_day is not None or self.target_position is not None
+        ):
+            raise ValueError("include/exclude operations do not accept a position")
+        return self
+
 
 class SelectionOperation(StrictModel):
     op: Literal["selection"] = "selection"
     action: Literal["change_access", "change_base", "change_strategy", "create_branch"]
     selection_id: str | None = Field(default=None, max_length=200)
     strategy: PlanningStrategy | None = None
+
+    @model_validator(mode="after")
+    def selection_matches_action(self) -> SelectionOperation:
+        if self.action == "change_strategy":
+            if self.strategy is None or self.selection_id is not None:
+                raise ValueError("strategy changes require only a strategy")
+        elif self.action in {"change_access", "change_base"}:
+            if self.selection_id is None or self.strategy is not None:
+                raise ValueError("access/base changes require only a selection ID")
+        elif self.strategy is not None:
+            raise ValueError("branch creation does not accept a strategy field")
+        return self
 
 
 class KnowledgeOperation(StrictModel):

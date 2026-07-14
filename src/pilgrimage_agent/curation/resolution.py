@@ -58,12 +58,16 @@ def _fingerprint(point: PilgrimagePoint) -> str:
     ).hexdigest()
 
 
-def evidence_from_point(point: PilgrimagePoint) -> SceneEvidence:
+def evidence_from_point(
+    point: PilgrimagePoint, *, trip_id: UUID | None = None
+) -> SceneEvidence:
     """Compatibility adapter: one legacy point becomes one raw evidence record."""
 
     provider = point.provenance.provider
+    namespace = str(trip_id) if trip_id is not None else "compatibility"
     evidence_id = uuid5(
-        NAMESPACE_URL, f"scene-evidence:{provider}:{point.subject_id}:{point.id}"
+        NAMESPACE_URL,
+        f"scene-evidence:{namespace}:{provider}:{point.subject_id}:{point.id}",
     )
     return SceneEvidence(
         evidence_id=evidence_id,

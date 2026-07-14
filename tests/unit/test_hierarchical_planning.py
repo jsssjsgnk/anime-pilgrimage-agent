@@ -12,6 +12,8 @@ from pilgrimage_agent.domain.models import (
 )
 from pilgrimage_agent.domain.planning import BaseCandidate
 from pilgrimage_agent.domain.workspace import (
+    DerivedKnowledgeRule,
+    EntityRef,
     PlanningStrategy,
     SubjectAppearance,
     VisitPlace,
@@ -156,7 +158,7 @@ def test_two_strategies_coexist_and_share_one_visit_across_coverage() -> None:
 def test_tight_walking_limit_keeps_omissions_and_missing_must_visit_visible() -> None:
     far_required = _fixture()[1][0]
     result = plan_hierarchical_itineraries(
-        _request(must_visit=frozenset({far_required.place_id}), walking_limit=500)
+        _request(must_visit=frozenset({far_required.place_id}), walking_limit=50)
     )
 
     for itinerary in result.itineraries:
@@ -170,6 +172,23 @@ def test_tight_walking_limit_keeps_omissions_and_missing_must_visit_visible() ->
             visit.place_id for day in itinerary.days for visit in day.visits
         }
         assert scheduled | set(omitted) == graph_ids
+
+
+def test_remote_area_is_structurally_omitted_instead_of_counted_as_walking() -> None:
+    fixture_places = _fixture()[1]
+    remote = _place("remote", 43.0618, 141.3545, ("328609",))
+    result = plan_hierarchical_itineraries(
+        _request(places=(*fixture_places, remote))
+    )
+
+    for itinerary in result.itineraries:
+        omissions = {item.place_id: item.reason_code for item in itinerary.omissions}
+        assert omissions[remote.place_id] == "unreachable"
+        assert all(
+            visit.place_id != remote.place_id
+            for day in itinerary.days
+            for visit in day.visits
+        )
 
 
 def test_candidate_graph_and_plan_ids_are_stable_under_input_order() -> None:
@@ -195,3 +214,29 @@ def test_candidate_graph_and_plan_ids_are_stable_under_input_order() -> None:
         {visit.place_id for day in item.days for visit in day.visits}
         for item in reverse.itineraries
     ]
+
+
+def test_accepted_closure_rule_becomes_a_visible_visit_window_omission() -> None:
+    request = _request()
+    blocked = request.places[0]
+    start = request.requirements.start_date
+    end = request.requirements.end_date
+    assert start is not None and end is not None
+    rule = DerivedKnowledgeRule(
+        trip_id=request.trip_id,
+        rule_type="closure_date_range",
+        target_refs=(EntityRef(entity_type="place", entity_id=str(blocked.place_id)),),
+        value={"closed_from": start.isoformat(), "closed_until": end.isoformat()},
+        evidence_ids=("K-a1b2c3d4e5f6",),
+        authority_level=5,
+        status="active_constraint",
+        created_at=datetime.now(UTC),
+    )
+
+    result = plan_hierarchical_itineraries(
+        request.model_copy(update={"knowledge_rules": (rule,)})
+    )
+
+    for itinerary in result.itineraries:
+        omissions = {item.place_id: item.reason_code for item in itinerary.omissions}
+        assert omissions[blocked.place_id] == "visit_window"

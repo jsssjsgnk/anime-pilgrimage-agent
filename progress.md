@@ -313,7 +313,7 @@
   - Optional in-app Browser setup remained unavailable due the known runtime initialization fault; no user browser state was inspected. The passing serialized desktop/mobile Playwright acceptance remains the visual/interactive evidence.
 
 ### Phase 14: Authoritative remediation audit and implementation
-- **Status:** in progress
+- **Status:** complete
 - Session start:
   - User supplied `anime-agent-remediation-handoff-files.zip` and designated five documents as the next-round authoritative requirements.
   - Restored the file-based planning context and confirmed the current branch is clean and synchronized before remediation work begins.
@@ -365,6 +365,17 @@
   - Added progressive workspace/evidence views and namespace/state-version-checked `/api/workspaces` start/read/confirm/evidence/plan endpoints while retaining the old workflow routes as compatibility APIs.
   - Added and passed focused Agent/API coverage for three subjects, one isolated Anitabi failure, shared-place multi-work coverage without duplicate visits, two independent strategy versions, hidden-by-default evidence, namespace isolation, persisted events, and stale-version rejection.
   - Passed full repository regression for this slice: Ruff, Python/TypeScript strict typing, 108 Python tests at 82.37% coverage, and 5 Web tests.
+  - Implemented the common PlanPatch preview/apply path with server-derived material confirmation, expected-version checks, idempotency, centralized invalidation, local move/reorder boundaries, deterministic replanning, Validator handoff, role-specific Reviewer/Replanner contexts, new itinerary versions, and structured diffs.
+  - Added API parse/direct-preview/apply routes and passed focused reload/event/state-version tests; natural-language and direct date edits normalize to the same operation.
+  - Added normalized SQL projection persistence for subjects, intents, evidence, places, areas, graphs, itinerary versions, patches, handoffs, and derived rules. Namespaced evidence IDs now prevent cross-trip primary-key collisions for the same provider record.
+  - Fixed RAG ingestion IDs to include the authorized namespace, removed the SQL dense-retrieval lexical-overlap gate, and reused shared conflict detection in SQL results.
+  - Added the strict retrieved-evidence→derived-rule authority/conflict boundary. High-authority current evidence remains proposed until explicit acceptance; conflicting/low-authority evidence remains non-binding, and accepted closure rules produce visit-window omissions through deterministic planning.
+- Error log update:
+  - A file-targeted mypy invocation treated repository imports from `scripts/` as an untyped installed package; use the configured repository-wide mypy target, which includes the source root correctly.
+  - Direct Conda Python lacked the uv-managed application site-packages and could not import SQLAlchemy for the projection smoke. Run the script through the locked `uv run` executable housed in the authorized Conda environment.
+  - The first Windows SQL smoke used the default Proactor event loop, which psycopg async explicitly rejects. The smoke now creates a bounded Selector event loop, matching psycopg's Windows requirement.
+  - The next host-side SQL smoke inherited the Compose-internal hostname `postgres`, which is not resolvable from Windows. The project-only smoke maps that hostname to `localhost` without logging the URL and skips cleanup when no row was persisted.
+  - Normalized PostgreSQL workspace smoke passed and cleaned up its project row: 3 evidence, 3 places, 1 area, 1 candidate graph, 2 itinerary versions, and 6 typed handoffs were persisted.
 - Error log:
   - An initial planning-file patch used an outdated heading and failed without changing files; inspected the current tails and reapplied against the exact Phase 14 headings.
   - Two parallel inventory searches referenced nonexistent legacy-style `services/` and `src/pilgrimage_agent/persistence/` directories; both were read-only failures. Re-ran against the actual flat `persistence.py` and current package tree.
@@ -389,3 +400,12 @@
 
 - The first multi-subject fixture put two intentionally distinct locations inside the 100 m place-resolution radius, so deterministic resolution correctly merged them and the expected canonical-place count failed.
 - Resolution: moved the distinct fixture points beyond the place-resolution radius while keeping them inside one 1.2 km area cluster. The remaining assertion was corrected to use the user-facing subject-intent warning label rather than an internal catalog ID.
+
+### 2026-07-14 - Phase 14 remediation completion
+
+- Added persistent workspace conversation endpoints and restored conversation plus pending PlanPatch previews after reload.
+- Added the three-pane desktop and tabbed mobile workspace, canonical-place MapLibre view, subject/area/status/confidence filters, itinerary versions, structured omissions, and preview-only mutation controls.
+- Real browser acceptance used live Anitabi data: 119 raw scene records became 96 canonical places in 28 areas; 36 places were scheduled across three days with no horizontal overflow at 1440x900 or 375x812.
+- Added `make verify-remediation`; remediation scenarios A-J pass and write both Markdown and JSON reports.
+- Fixed two aggregate compatibility regressions discovered only by legacy gates: premature Route A heading exposure and fixture/live point-ID divergence in Route B. The latter now bounds matrix candidates and preserves complete omission accounting.
+- Final `make verify-all` passed with exit code 0 in 652.4 seconds: all historical phase reports, clean Compose recovery, 131 Python tests at 80.41% coverage, 8 Web tests, 10 full desktop/mobile E2E tests, real SQL/E5 RAG smoke, and remediation A-J.

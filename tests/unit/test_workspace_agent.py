@@ -13,6 +13,7 @@ from pilgrimage_agent.agent.workspace import (
     SubjectConfirmation,
     WorkspaceAgent,
     WorkspaceStartRequest,
+    WorkspaceState,
     WorkspaceStatus,
     workspace_view,
 )
@@ -27,7 +28,12 @@ from pilgrimage_agent.domain.models import (
     SubjectSearchResult,
     TripRequest,
 )
-from pilgrimage_agent.domain.workspace import AgentRole
+from pilgrimage_agent.domain.workspace import (
+    AgentRole,
+    PlaceOperation,
+    PlanPatch,
+    UpdateRequirementOperation,
+)
 
 
 def _provenance(provider: str) -> DataProvenance:
@@ -124,6 +130,43 @@ def _requirements() -> TripRequest:
             SubjectIntent(query="孤独摇滚", is_primary=True, priority=5),
         ),
         walking_preference="medium",
+    )
+
+
+async def _planned_workspace() -> tuple[WorkspaceAgent, WorkspaceState]:
+    agent = WorkspaceAgent(MultiSubjectTools())
+    initial = await agent.start(
+        WorkspaceStartRequest(
+            owner_user_id="user-1",
+            thread_id="thread-1",
+            request_summary="两天巡礼《孤独摇滚》和《莉可丽丝》。",
+            requirements=_requirements(),
+        )
+    )
+    curated = await agent.confirm_subjects(
+        initial,
+        ConfirmWorkspaceSubjectsRequest(
+            owner_user_id="user-1",
+            thread_id="thread-1",
+            expected_state_version=1,
+            confirmations=tuple(
+                SubjectConfirmation(
+                    intent_id=group.intent.intent_id,
+                    decision="accept",
+                    selected_subject_id=group.candidates[0].subject_id,
+                )
+                for group in initial.subject_groups
+            ),
+        ),
+    )
+    return agent, agent.plan(
+        curated,
+        PlanWorkspaceRequest(
+            owner_user_id="user-1",
+            thread_id="thread-1",
+            expected_state_version=curated.state_version,
+            base_id=curated.base_candidates[0].base_id,
+        ),
     )
 
 
@@ -248,3 +291,102 @@ async def test_workspace_plans_two_independent_versions_and_progressive_counts()
         assert shared.place_id in coverage["bocchi"].scheduled_place_ids
         assert shared.place_id in coverage["lycoris"].scheduled_place_ids
     assert any(item.receiver is AgentRole.VALIDATOR for item in planned.handoffs)
+
+
+@pytest.mark.asyncio
+async def test_patch_preview_apply_revalidate_diff_and_idempotency() -> None:
+    agent, planned = await _planned_workspace()
+    walking_patch = PlanPatch(
+        trip_id=planned.trip_id,
+        expected_base_version=planned.state_version,
+        operations=(
+            UpdateRequirementOperation(field="walking_preference", value="low"),
+        ),
+        rationale="减少每天步行",
+        requires_confirmation=True,
+        idempotency_key="fixture:walking-low",
+        created_at=datetime.now(UTC),
+    )
+    proposed, preview = agent.propose_patch(planned, walking_patch)
+
+    assert proposed.state_version == planned.state_version
+    assert preview.patch.requires_confirmation is False
+    assert preview.impact.validation_required is True
+    changed = await agent.apply_patch(
+        proposed, preview.patch.patch_id, confirm=False
+    )
+    assert changed.state_version == planned.state_version + 1
+    assert changed.requirements.walking_preference == "low"
+    assert changed.diffs[-1].changed_requirements == ("walking_preference",)
+    current_versions = tuple(
+        item for item in changed.itineraries if item.version == changed.state_version
+    )
+    historical_versions = tuple(
+        item for item in changed.itineraries if item.version != changed.state_version
+    )
+    assert all(item.applied_patch_id == preview.patch.patch_id for item in current_versions)
+    assert all(item.applied_patch_id is None for item in historical_versions)
+    assert len(current_versions) == len(historical_versions) == 2
+    assert any(item.role is AgentRole.REPLANNER for item in changed.contexts)
+    retried = await agent.apply_patch(changed, preview.patch.patch_id, confirm=False)
+    assert retried == changed
+
+
+@pytest.mark.asyncio
+async def test_material_date_and_local_move_patches_preserve_explicit_boundaries() -> None:
+    agent, planned = await _planned_workspace()
+    original_start = planned.requirements.start_date
+    original_end = planned.requirements.end_date
+    assert original_start is not None and original_end is not None
+    shifted_start = original_start + timedelta(days=7)
+    date_patch = PlanPatch(
+        trip_id=planned.trip_id,
+        expected_base_version=planned.state_version,
+        operations=(
+            UpdateRequirementOperation(field="start_date", value=shifted_start),
+        ),
+        rationale="整段行程延后一周",
+        requires_confirmation=False,
+        idempotency_key="fixture:shift-dates",
+        created_at=datetime.now(UTC),
+    )
+    proposed, preview = agent.propose_patch(planned, date_patch)
+    assert preview.patch.requires_confirmation is True
+    with pytest.raises(ValueError, match="explicit confirmation"):
+        await agent.apply_patch(proposed, preview.patch.patch_id, confirm=False)
+    shifted = await agent.apply_patch(proposed, preview.patch.patch_id, confirm=True)
+    assert shifted.requirements.start_date == shifted_start
+    assert shifted.requirements.end_date == original_end + timedelta(days=7)
+
+    place_id = shifted.itineraries[0].days[0].visits[0].place_id
+    move_patch = PlanPatch(
+        trip_id=shifted.trip_id,
+        expected_base_version=shifted.state_version,
+        operations=(PlaceOperation(action="move_day", place_id=place_id, target_day=2),),
+        rationale="把这个地点移到第二天",
+        requires_confirmation=False,
+        idempotency_key="fixture:move-place",
+        created_at=datetime.now(UTC),
+    )
+    move_proposed, move_preview = agent.propose_patch(shifted, move_patch)
+    moved = await agent.apply_patch(
+        move_proposed, move_preview.patch.patch_id, confirm=False
+    )
+    current_versions = tuple(
+        itinerary
+        for itinerary in moved.itineraries
+        if itinerary.version == moved.state_version
+    )
+    historical_versions = tuple(
+        itinerary
+        for itinerary in moved.itineraries
+        if itinerary.version != moved.state_version
+    )
+    for itinerary in current_versions:
+        assert place_id in {item.place_id for item in itinerary.days[1].visits}
+        assert place_id not in {item.place_id for item in itinerary.days[0].visits}
+    assert any(
+        place_id in {item.place_id for item in itinerary.days[0].visits}
+        for itinerary in historical_versions
+    )
+    assert moved.diffs[-1].changed_day_numbers == (2,)
