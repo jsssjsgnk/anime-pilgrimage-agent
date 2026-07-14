@@ -341,6 +341,19 @@
   - Rebuilt all four Compose services in 166.7 seconds; bounded health checks report all healthy and PostgreSQL available.
   - Verified safe runtime diagnostics from the running API and wrote `artifacts/remediation-a-runtime-truthfulness.md`, honestly marking credentialed live/SearchAPI evidence UNVERIFIED.
   - Exercised the running workflow endpoint to initialize lifespan checkpoint resources, then restored the same waiting-confirmation trip successfully without any external Provider call.
+  - Added the remediated strict domain schemas: 1–3 subject intents, scene evidence/quarantine, canonical places/appearances, areas, candidate graphs, itinerary versions, typed patch operations/impact/diff, Agent handoffs, role contexts, and derived knowledge rules.
+  - Added an explicit stable legacy `anime_query` adapter into one primary SubjectIntent and focused invariant tests for source accounting, duplicate shared-place scheduling, patch discrimination, handoff completion, and rule authority.
+  - First remediation-domain Ruff pass found one now-unused enum import (which also disturbed import sorting); removed it before rerunning the focused checks.
+  - A combined error-log patch had an invalid empty hunk and changed nothing; reapplied valid file-specific hunks. Ruff's diff then showed `PlanningStrategy` sorts before `PlanPatch` under its import normalization, so the exact order was applied manually.
+  - Focused domain tests exposed that serializing the expanded TripRequest into a 500-character confirmation summary overflowed the boundary. Replaced raw JSON with a concise normalized requirements projection and changed required-subject validation to the new intent set.
+  - Added additive ORM records and Alembic `0004` for normalized subjects/intents, evidence, places/links/appearances/overrides, areas/members, candidate graphs, itinerary versions, PlanPatches, Agent handoffs, and derived rules; legacy trip JSON remains untouched.
+  - First migration static pass found only the repository's Alembic import grouping convention; moved `alembic.op` after SQLAlchemy imports and retained the implementation unchanged.
+  - Mypy could not safely type a generic timestamp-column helper in the Alembic script; inlined the two subject timestamp columns and aligned the ORM record explicitly.
+  - Upgraded the existing project PostgreSQL database transactionally from `0003` to `0004`; Alembic reports the new head and legacy data was not rewritten.
+  - Created a uniquely named project-scoped empty test database, upgraded it from `0001` through `0004`, verified all six sampled remediation tables, and removed the test database in the command's `finally` block.
+  - One intermediate combined patch again contained an invalid empty hunk and made no changes; reapplied the migration/ORM/progress edits with valid adjacent context.
+  - Passed full domain-foundation regression: lint, strict Python/TypeScript typing, 95 Python tests at 81.60% coverage, and 5 Web tests.
+  - Wrote `artifacts/remediation-domain-foundation.md` with explicit PASS/PARTIAL scenario interpretation and migration evidence.
 - Error log:
   - An initial planning-file patch used an outdated heading and failed without changing files; inspected the current tails and reapplied against the exact Phase 14 headings.
   - Two parallel inventory searches referenced nonexistent legacy-style `services/` and `src/pilgrimage_agent/persistence/` directories; both were read-only failures. Re-ran against the actual flat `persistence.py` and current package tree.

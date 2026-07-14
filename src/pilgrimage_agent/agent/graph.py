@@ -118,9 +118,11 @@ def _day_hashes(plan: RouteBPlan, revision: int = 0) -> tuple[str, ...]:
 
 def _required_trip_fields(request: TripRequest) -> tuple[str, ...]:
     missing: list[str] = []
-    for name in ("origin", "destination", "start_date", "end_date", "anime_query"):
+    for name in ("origin", "destination", "start_date", "end_date"):
         if getattr(request, name) is None:
             missing.append(name)
+    if not request.subject_intents:
+        missing.append("subject_intents")
     return tuple(missing)
 
 
@@ -174,10 +176,18 @@ def build_workflow(
 
     def confirm_requirements(state: WorkflowState) -> WorkflowState:
         current = TripRequest.model_validate(state["requirements"])
+        subjects = ", ".join(item.query for item in current.subject_intents)
         request = ConfirmationRequest(
             kind="requirements",
             title="Confirm trip requirements",
-            summary=current.model_dump_json(),
+            summary=(
+                f"{current.origin or 'origin needed'} → "
+                f"{current.destination or 'destination needed'}; "
+                f"{current.start_date or 'start needed'} to "
+                f"{current.end_date or 'end needed'}; subjects: "
+                f"{subjects or 'needed'}; budget={current.budget_level or 'unset'}; "
+                f"walking={current.walking_preference or 'unset'}"
+            ),
             requires_explicit_choice=True,
         )
         decision = ConfirmationDecision.model_validate(interrupt(request.model_dump(mode="json")))

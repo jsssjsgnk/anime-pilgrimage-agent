@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
@@ -39,12 +39,31 @@ class Citation(StrictModel):
     accessed_at: date
 
 
+class SubjectIntent(StrictModel):
+    """Trip-owned intent; catalog facts remain in confirmed subject records."""
+
+    intent_id: UUID = Field(default_factory=uuid4)
+    query: str = Field(min_length=1, max_length=200)
+    confirmed_subject_id: str | None = Field(default=None, min_length=1, max_length=50)
+    priority: int = Field(default=3, ge=1, le=5)
+    minimum_place_count: int | None = Field(default=None, ge=0, le=100)
+    is_primary: bool = False
+    status: Literal["proposed", "confirmed", "rejected"] = "proposed"
+
+    @model_validator(mode="after")
+    def confirmation_is_consistent(self) -> "SubjectIntent":
+        if self.status == "confirmed" and self.confirmed_subject_id is None:
+            raise ValueError("confirmed subject intents require a catalog subject ID")
+        return self
+
+
 class TripRequest(StrictModel):
     origin: str | None = Field(default=None, max_length=200)
     destination: str | None = Field(default=None, max_length=200)
     start_date: date | None = None
     end_date: date | None = None
     anime_query: str | None = Field(default=None, max_length=200)
+    subject_intents: tuple[SubjectIntent, ...] = Field(default=(), max_length=3)
     budget_level: Literal["low", "medium", "high"] | None = None
     walking_preference: Literal["low", "medium", "high"] | None = None
     max_walking_meters_per_day: float | None = Field(default=None, gt=0, le=50_000)
@@ -56,11 +75,52 @@ class TripRequest(StrictModel):
     must_visit_point_ids: tuple[UUID, ...] = ()
     excluded_point_ids: tuple[UUID, ...] = ()
 
+    @model_validator(mode="before")
+    @classmethod
+    def adapt_legacy_anime_query(cls, value: object) -> object:
+        """Map the old single query to one primary intent without hiding compatibility."""
+
+        if not isinstance(value, dict):
+            return value
+        query = value.get("anime_query")
+        if value.get("subject_intents") or not isinstance(query, str) or not query.strip():
+            return value
+        adapted = dict(value)
+        normalized = query.strip()
+        adapted["subject_intents"] = (
+            {
+                "intent_id": str(uuid5(NAMESPACE_URL, f"legacy-anime:{normalized}")),
+                "query": normalized,
+                "priority": 5,
+                "is_primary": True,
+                "status": "proposed",
+            },
+        )
+        return adapted
+
     @model_validator(mode="after")
     def dates_are_ordered(self) -> "TripRequest":
         if self.start_date and self.end_date and self.end_date < self.start_date:
             raise ValueError("end_date must not precede start_date")
+        intent_ids = [item.intent_id for item in self.subject_intents]
+        if len(intent_ids) != len(set(intent_ids)):
+            raise ValueError("subject intent IDs must be unique")
+        primary = [item for item in self.subject_intents if item.is_primary]
+        if self.subject_intents and len(primary) != 1:
+            raise ValueError("one and only one subject intent must be primary")
+        confirmed_ids = [
+            item.confirmed_subject_id
+            for item in self.subject_intents
+            if item.confirmed_subject_id is not None
+        ]
+        if len(confirmed_ids) != len(set(confirmed_ids)):
+            raise ValueError("one catalog subject cannot satisfy multiple intents")
         return self
+
+    @property
+    def primary_subject_query(self) -> str | None:
+        primary = next((item.query for item in self.subject_intents if item.is_primary), None)
+        return primary or self.anime_query
 
 
 class ConfirmedSubject(StrictModel):
