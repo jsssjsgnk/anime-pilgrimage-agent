@@ -1,6 +1,6 @@
 # Anime Pilgrimage Agent
 
-A source-aware, mixed-initiative planner that turns anime pilgrimage ideas into a constraint-checked itinerary. Route A is the complete set of sourced candidate points; Route B is the executable subset selected by deterministic time, access, and walking rules. The product is read-only: it never books, pays, or silently confirms consequential choices.
+A source-aware, mixed-initiative planner that turns natural multi-work pilgrimage requests into a constraint-checked, multi-day itinerary. The product uses one continuous conversational workspace for title confirmation, place exploration, batch selection, planning, and revision. It is read-only: it never books, pays, or silently confirms consequential choices.
 
 ## What is implemented
 
@@ -10,7 +10,7 @@ A source-aware, mixed-initiative planner that turns anime pilgrimage ideas into 
 - A durable LangGraph workflow with three explicit interrupts, PostgreSQL checkpoints, five project-owned memory stores, structured review, and a three-revision cap.
 - Trip-scoped continuous conversation with PostgreSQL history, browser reload recovery, grounded status/plan/source explanations, and deterministic conversational replanning.
 - Hybrid RAG for Markdown/TXT/text PDFs using multilingual E5, exact pgvector cosine search, persistent bm25s, RRF, namespace filters, citations, freshness, conflicts, and prompt-injection isolation.
-- A responsive React workflow for request → subject confirmation → access/base → plan → local revision → evidence → JSON/GeoJSON/standalone HTML export.
+- A responsive React workspace for natural request → title confirmation → scene/place exploration → batch selection → multi-day plan → conversational revision, with scene images and source attribution disclosed on demand.
 
 ## Architecture
 
@@ -62,12 +62,11 @@ Web: `http://localhost:4173`; API: `http://localhost:8000`. MCP and PostgreSQL a
 
 The reproducible walkthrough is in [docs/DEMO.md](docs/DEMO.md). In brief:
 
-1. Open the Web and submit the prefilled Kyoto → Tokyo, three-day request.
-2. Explicitly confirm *Bocchi the Rock!* and inspect the current 74-point Anitabi detail subset; the UI discloses that `/lite` advertises 414 total map points and does not claim unavailable details are complete.
-3. Select the manual transport candidates (or confirmed flight snapshots when IATA codes are supplied), a Route A-derived base, and the 5 km walking cap.
-4. Generate Route B, then ask the planning Agent why it made the arrangement or whether the point set is complete.
-5. In the same conversation, request “第二天少走 30%”. Verify plan version 2, Days 1 and 3 remain stable, then refresh the browser and confirm the transcript and plan version recover.
-6. Inspect the dated/authority-labelled evidence and export JSON, GeoJSON, and standalone HTML.
+1. Open the Web and describe several works and the desired pace in one natural sentence.
+2. Confirm the matched works once, then explore the compact map and open a point to inspect its episode, scene image, and source link.
+3. Enter batch-selection mode, tick any number of filtered places (or select all), and preview one combined add/exclude/move operation.
+4. Generate the multi-day itinerary, then continue the same conversation with a request such as “第二天少走一点”.
+5. Confirm the preview, refresh the browser, and verify the conversation and updated itinerary recover without exposing internal IDs or orchestration diagnostics.
 
 All dates are relative to the test clock. The included content is fixed, short, project-authored fixture material; live provider checks are separate and read-only.
 

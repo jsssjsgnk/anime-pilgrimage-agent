@@ -42,6 +42,7 @@ class _AnitabiDetailPoint(_AnitabiModel):
     ep: int | str | None = None
     s: int | float | None = Field(default=None, ge=0)
     geo: tuple[float, float]
+    image: HttpUrl | None = None
     origin: str | None = Field(default=None, max_length=200)
     origin_url: HttpUrl | None = Field(default=None, alias="originURL")
 
@@ -194,6 +195,7 @@ class AnitabiProvider:
             latitude=latitude,
             longitude=longitude,
             episode_refs=(episode_reference,) if episode_reference else (),
+            image_url=item.image,
             confidence="community",
             source_label=item.origin or "Anitabi",
             provenance=DataProvenance.model_validate(

@@ -803,6 +803,27 @@ async def start_workspace(request: WorkspaceStartRequest) -> WorkspaceView:
         except ValueError as error:
             raise _workspace_value_error(error) from error
         await _save_workspace(store, state, "workspace_started")
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            state.trip_id,
+            ConversationEventPayload(
+                role="user",
+                content=request.request_summary,
+                intent=ConversationIntent.TRIP_STARTED,
+            ),
+        )
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            state.trip_id,
+            ConversationEventPayload(
+                role="assistant",
+                content="好的, 我先核对你提到的作品。确认无误后, 我会整理地点并安排每天的路线。",
+                intent=ConversationIntent.CONFIRMATION_HELP,
+                action=ConversationAction(kind="confirmation_required"),
+            ),
+        )
     return workspace_view(state)
 
 
@@ -986,15 +1007,15 @@ async def send_workspace_message(
         updated = state
         if any(term in normalized for term in ("状态", "进展", "还缺", "status")):
             answer = (
-                f"当前状态是 {state.status.value}。已确认 "
-                f"{len(state.confirmed_subjects)} 部作品, 归并 {len(state.places)} 个地点, "
-                f"形成 {len(state.areas)} 个区域, 共有 {len(state.itineraries)} 个行程版本。"
+                f"目前已确认 {len(state.confirmed_subjects)} 部作品, 整理出 "
+                f"{len(state.places)} 个巡礼地点和 {len(state.areas)} 个游览区域。"
+                f"现在有 {len(state.itineraries)} 个可回看的行程版本。"
             )
         elif not state.itineraries:
             intent = ConversationIntent.CONFIRMATION_HELP
             answer = (
-                "当前还不能生成行程修改: 请先确认作品并生成首个行程版本。"
-                "已确认的数据会保留在这个工作区中。"
+                "请先确认作品并生成第一版行程, 之后就能继续用对话调整。"
+                "已经确认的内容会继续保留。"
             )
             action = ConversationAction(kind="confirmation_required")
         else:
@@ -1009,16 +1030,15 @@ async def send_workspace_message(
                 await _save_workspace(store, updated, "workspace_patch_proposed")
                 intent = ConversationIntent.MODIFY_PLAN
                 action = ConversationAction(kind="confirmation_required")
-                affected = "、".join(preview.impact.invalidated_nodes)
                 answer = (
-                    f"我已生成 PlanPatch 预览: {preview.patch.rationale}。"
-                    f"会重新计算 {affected}; 确认前不会改变当前行程。"
+                    f"已理解这次修改: {preview.patch.rationale}。"
+                    "我会先展示它会影响哪些安排, 确认前不会改变当前行程。"
                 )
             except ValueError:
                 intent = ConversationIntent.UNSUPPORTED_CHANGE
                 action = ConversationAction(kind="unsupported_change")
                 answer = (
-                    "这条消息暂时不能安全转换为结构化修改。你可以修改日期、步行偏好、"
+                    "我暂时无法准确执行这条修改。你可以修改日期、步行偏好、"
                     "住宿基点, 或使用地点卡片排除和移动地点; 我不会猜测未识别的操作。"
                 )
         assistant = await _append_conversation_message(

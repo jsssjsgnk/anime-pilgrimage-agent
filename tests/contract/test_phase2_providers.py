@@ -130,6 +130,7 @@ async def test_anitabi_contract_fetches_complete_points_and_reuses_cache() -> No
                     "ep": 1,
                     "s": 62,
                     "geo": [35.6615, 139.6670],
+                    "image": "https://image.anitabi.cn/points/328609/point-a.jpg?plan=h160",
                     "origin": "Official fixture source",
                     "originURL": "https://example.org/source-a",
                 },
@@ -155,6 +156,7 @@ async def test_anitabi_contract_fetches_complete_points_and_reuses_cache() -> No
     assert first.is_complete
     assert len(first.points) == 2
     assert first.points[0].source_label == "Official fixture source"
+    assert str(first.points[0].image_url).endswith("point-a.jpg?plan=h160")
     assert str(first.points[0].provenance.source_url) == "https://example.org/source-a"
     assert first.points[1].latitude == 35.6618
     assert "OP" in first.points[1].episode_refs[0]

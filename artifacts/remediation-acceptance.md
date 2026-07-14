@@ -23,7 +23,7 @@ Overall: **PASS**
 - PASS: normalized PostgreSQL workspace projection — Real PostgreSQL projection rows are inserted, verified, and cleaned.
 - PASS: SQL real-E5 RAG production loop — Real E5 + pgvector conflict, isolation, deletion refresh, injection safety.
 - PASS: Alembic remediation head — Running Compose database reports the additive remediation migration head.
-- PASS: mixed-workspace Web tests — Workspace start, confirmation, planning, patch, pending recovery and legacy tests.
+- PASS: mixed-workspace Web tests — Single-workspace start, confirmation, planning, patch, pending recovery, and compatibility tests.
 
 ## Honest limitations
 

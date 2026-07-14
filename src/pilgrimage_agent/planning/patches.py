@@ -194,16 +194,23 @@ def parse_patch_instruction(
         operation = UpdateRequirementOperation(
             field="start_date", value=date.fromisoformat(match.group(1))
         )
-    elif "步行" in normalized or "walking" in lowered:
+    elif any(
+        token in lowered
+        for token in ("步行", "walking", "少走", "多走", "走路", "不要走太多")
+    ):
         preference = next(
             (
                 value
                 for token, value in (
+                    ("不要走太多", "low"),
+                    ("少走", "low"),
                     ("减少", "low"),
                     ("低", "low"),
                     ("low", "low"),
+                    ("适中", "medium"),
                     ("中", "medium"),
                     ("medium", "medium"),
+                    ("多走", "high"),
                     ("高", "high"),
                     ("high", "high"),
                 )
@@ -212,7 +219,7 @@ def parse_patch_instruction(
             None,
         )
         if preference is None:
-            raise ValueError("walking changes must specify low, medium or high")
+            raise ValueError("请说明希望少走、适中, 还是愿意多走一些")
         operation = UpdateRequirementOperation(
             field="walking_preference", value=preference
         )

@@ -29,6 +29,7 @@ class SceneEvidence(StrictModel):
     names: tuple[str, ...] = Field(min_length=1, max_length=12)
     description: str | None = Field(default=None, max_length=2000)
     episode_refs: tuple[str, ...] = ()
+    image_url: HttpUrl | None = None
     source_url: HttpUrl | None = None
     source_label: str | None = Field(default=None, max_length=200)
     provenance: DataProvenance

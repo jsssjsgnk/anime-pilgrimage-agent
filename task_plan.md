@@ -116,6 +116,17 @@ Phase 14 in progress — authoritative remediation audit and implementation
 - [x] Re-run legacy regression gates plus the new remediation acceptance and publish honest reports
 - **Status:** complete (`make verify-all` PASS, including remediation A-J)
 
+### Phase 15: Single natural-conversation product flow
+- [x] Remove implementation/provider terminology from user-facing workspace copy
+- [x] Remove workspace IDs, raw state enums, Agent role names, and task identifiers from the consumer UI
+- [x] Accept natural multi-work requests instead of requiring one title per line
+- [x] Remove the visible legacy Route A/Route B flow while retaining backend compatibility only
+- [x] Add scene-rich point details loaded on marker selection
+- [x] Add marker multi-selection and previewed batch itinerary actions
+- [x] Update unit and browser acceptance to enforce one visible workflow
+- [x] Run focused and aggregate gates, document results, commit, and push
+- **Status:** complete (`make verify-all` PASS; commit and push follow in this handoff)
+
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
 2. What code already exists, and which unrelated user changes must be preserved?
@@ -225,6 +236,16 @@ Phase 14 in progress — authoritative remediation audit and implementation
 | First aggregate remediation run found the compatibility heading exposed `Route A` before subject confirmation | 1 | Rename the compatibility section while retaining the confirmed Route A heading; desktop/mobile Phase 2 E2E passed |
 | Second aggregate remediation run found legacy Route B used fixture IDs while Route A used live Anitabi IDs | 1 | Make Route B use the configured point Provider, bound its matrix candidates to 49, and restore explicit omissions for the full Route A set |
 | The initial final aggregate command used the system Python instead of the authorized environment | 1 | Prepend the authorized Conda environment and its Library/bin directory before running the canonical gate |
+| First scene-image patch referenced `providers/points.py` outside the source package | 1 | Correct the path to `src/pilgrimage_agent/providers/points.py` |
+| Corrected scene-image patch assumed a compact validation block that differs from the current formatter output | 2 | Inspect the exact normalization function and apply smaller file-specific hunks |
+| Combined selection/evidence UI patch matched a stale response-assignment context | 1 | Split helper, patch-preview, selection-state, and render changes into exact local hunks |
+| First Phase 15 lint pass rejected two full-width commas in a Python user-facing string | 1 | Use the repository's established ASCII punctuation convention in Python while retaining natural Chinese UI copy in TypeScript |
+| Second Phase 15 lint pass rejected stringifying an `unknown` patch target day | 1 | Narrow the target to a number and format it explicitly before building user-facing operation text |
+| Phase 15 Compose rebuild exceeded the two-minute shell wrapper timeout while Docker buffered output | 1 | Retry with plain progress and a longer bounded timeout, then inspect service health before browser tests |
+| Aggregate Phase 4 mobile E2E had a MapLibre marker intercept another overlapping marker | 1 | Use the accessible checkbox surface for batch selection and an explicit marker event for detail behavior; repeat the mobile test to rule out flakiness |
+| The first combined lint-fix patch contained a malformed hunk boundary | 1 | Reissue the exact code and error-log hunks without an empty trailing hunk marker |
+| Focused Web tests still expected the workspace ID after the UI intentionally removed it | 1 | Assert pending-patch recovery while explicitly asserting the diagnostic ID stays hidden |
+| Natural walking recovery copy introduced one full-width comma rejected by Python lint | 1 | Keep the message natural while using the repository's ASCII comma convention |
 
 ## Guardrails
 - Never expose `.env`, secrets, tokens, headers, cookies, or signed MCP URLs.

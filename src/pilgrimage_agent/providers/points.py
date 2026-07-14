@@ -136,6 +136,9 @@ class ImportedPilgrimagePointProvider:
         refs = data.get("episode_refs", [])
         if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
             raise ValueError
+        image_url = data.get("image_url")
+        if not isinstance(image_url, str) or not image_url.startswith(("http://", "https://")):
+            image_url = None
         confidence = data.get("confidence", "community")
         return PilgrimagePoint(
             id=uuid5(NAMESPACE_URL, stable_key),
@@ -144,6 +147,7 @@ class ImportedPilgrimagePointProvider:
             latitude=latitude,
             longitude=longitude,
             episode_refs=tuple(refs),
+            image_url=image_url,
             confidence=confidence,
             provenance=DataProvenance.model_validate(
                 {**result_provenance.model_dump(), "source_url": source_url}

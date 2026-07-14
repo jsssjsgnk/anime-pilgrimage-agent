@@ -50,19 +50,21 @@ describe("TripWorkspace", () => {
     window.sessionStorage.clear();
   });
 
-  it("starts a multi-subject workspace and requires explicit catalog confirmation", async () => {
+  it("starts a multi-subject workspace from natural input and requires explicit confirmation", async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      void input;
-      void init;
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/messages") && !init?.method) return json([]);
       return json(workspace("awaiting_subject_confirmation", 1));
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<TripWorkspace />);
 
-    fireEvent.click(screen.getByRole("button", { name: "创建巡礼工作区" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始规划" }));
     expect(await screen.findByRole("heading", { name: "作品匹配结果" })).toBeVisible();
-    expect(screen.getByText("场景证据")).toBeVisible();
-    expect(screen.getByText("规范地点")).toBeVisible();
+    expect(screen.getByText("场景资料")).toBeVisible();
+    expect(screen.getByText("巡礼地点")).toBeVisible();
     const rawBody = fetchMock.mock.calls[0]?.[1]?.body;
     if (typeof rawBody !== "string") throw new Error("Expected a JSON request body");
     const payload = JSON.parse(rawBody) as { requirements: { subject_intents: unknown[] } };
@@ -84,6 +86,7 @@ describe("TripWorkspace", () => {
         ? input
         : input instanceof URL ? input.href : input.url;
       if (url.endsWith("/api/workspaces")) return json(started);
+      if (url.endsWith("/messages") && !init?.method) return json([]);
       if (url.includes("/subjects/confirm")) return json(confirmed);
       if (url.endsWith("/plan")) return json(planned);
       if (url.endsWith("/messages") && init?.method === "POST") return json({ trip_id: tripId, messages: [], assistant_message: { message_id: "00000000-0000-4000-8000-000000000205", role: "assistant", content: "修改预览已生成", intent: "modify_plan", created_at: "2030-01-01T00:00:00Z" }, workspace: planned, preview: { patch, impact: { patch_id: patch.patch_id, invalidated_nodes: ["itinerary_planner"], invalidated_refs: [], stable_refs: ["subject:*"], validation_required: true, reviewer_required: true, confirmation_required: false } } });
@@ -93,16 +96,16 @@ describe("TripWorkspace", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<TripWorkspace />);
 
-    fireEvent.click(screen.getByRole("button", { name: "创建巡礼工作区" }));
-    fireEvent.click(await screen.findByRole("button", { name: "确认作品并归并地点" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始规划" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认并整理地点" }));
     fireEvent.click(await screen.findByRole("button", { name: "生成层级行程" }));
     const editor = await screen.findByLabelText("继续修改行程");
     fireEvent.change(editor, { target: { value: "把步行偏好设为 low" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送给 Agent" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByRole("dialog", { name: "应用这次修改？" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "确认并重新规划" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
   it("restores the trip-scoped workspace after reload", async () => {
@@ -128,8 +131,8 @@ describe("TripWorkspace", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<TripWorkspace />);
 
-    expect(await screen.findByText(tripId.slice(0, 8))).toBeVisible();
     expect(await screen.findByRole("dialog", { name: "应用这次修改？" })).toBeVisible();
+    expect(screen.queryByText(tripId.slice(0, 8))).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`/api/workspaces/${tripId}`), expect.anything());
   });

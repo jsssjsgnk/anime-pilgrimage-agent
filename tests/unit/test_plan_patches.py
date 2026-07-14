@@ -106,6 +106,20 @@ def test_date_patch_survives_json_persistence_round_trip() -> None:
     assert operation.value == date(2030, 9, 2)
 
 
+def test_natural_walking_request_does_not_require_internal_enum_words() -> None:
+    patch = parse_patch_instruction(
+        trip_id=uuid4(),
+        expected_base_version=3,
+        instruction="我想每天少走一点",
+        idempotency_key="fixture:natural-walking",
+    )
+
+    operation = patch.operations[0]
+    assert isinstance(operation, UpdateRequirementOperation)
+    assert operation.field == "walking_preference"
+    assert operation.value == "low"
+
+
 def test_operation_models_reject_incomplete_targets() -> None:
     with pytest.raises(ValidationError, match="target day"):
         PlaceOperation(action="move_day", place_id=uuid4())

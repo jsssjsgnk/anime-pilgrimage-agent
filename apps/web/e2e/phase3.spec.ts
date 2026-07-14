@@ -1,42 +1,36 @@
 import { expect, test } from "@playwright/test";
+
 import { captureEvidence } from "./screenshot-evidence";
-import { provideDeterministicRequirements } from "./workflow-fixture";
+import { planWorkspace } from "./workspace-flow";
 
-test("confirmed Route A becomes a validated three-day Route B", async ({ page }, testInfo) => {
-  await provideDeterministicRequirements(page);
-  await page.goto("/");
-  await page.getByRole("button", { name: /整理旅行条件/ }).click();
-  await page.getByRole("button", { name: /确认条件并查询 Bangumi/ }).click();
-  await page.getByRole("button", { name: "确认并查看 Route A" }).click();
+test("planned map stays compact and opens scene-rich place details", async ({ page }, testInfo) => {
+  await planWorkspace(page);
 
-  await expect(page.getByRole("heading", { name: "选择抵离交通与住宿基地" })).toBeVisible();
-  await page.getByRole("radio", { name: "选择去程 人工交通" }).click();
-  await page.getByRole("radio", { name: "选择返程 人工交通" }).click();
-  await page.getByRole("radio", { name: /选择基地 .*Route A 中心候选/ }).click();
-  await expect(page.getByRole("radio", { name: /选择基地 .*Route A 中心候选/ })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  const routeBResponse = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      /\/api\/workflows\/[^/]+\/resume$/.test(new URL(response.url()).pathname),
-    { timeout: 20_000 },
-  );
-  await page.getByRole("button", { name: /生成可执行 Route B/ }).click();
-  expect((await routeBResponse).ok()).toBe(true);
+  const map = page.getByLabel(/巡礼地点地图，共 \d+ 个地点/u);
+  await expect(map).toBeVisible();
+  const mapBox = await map.boundingBox();
+  expect(mapBox).not.toBeNull();
+  expect(mapBox?.height).toBeLessThanOrEqual(testInfo.project.name.startsWith("mobile") ? 270 : 310);
 
-  const timeline = page.getByRole("region", { name: "Route B · 三日可执行时间轴" });
-  await expect(
-    timeline.getByRole("heading", { name: "Route B · 三日可执行时间轴" }),
-  ).toBeVisible({ timeout: 10_000 });
-  await expect(timeline.getByText("ORS 道路估算")).toBeVisible();
-  await expect(timeline.getByText(/Route A 中心候选/, { exact: true })).toBeVisible();
-  await expect(timeline.getByText(/DAY 01/)).toBeVisible();
-  await expect(timeline.getByRole("link", { name: /现场导航 1/ }).first()).toHaveAttribute(
-    "href",
-    /https:\/\/www\.google\.com\/maps\/dir\/\?api=1/,
-  );
+  const markers = map.locator(".mix-map-marker");
+  expect(await markers.count()).toBeGreaterThan(1);
+  const pointBrowser = page.locator(".mix-point-browser");
+  await pointBrowser.getByText(/浏览当前地点/u).click();
+  await pointBrowser.getByRole("button").first().click();
+  await expect(page.locator("#mix-place-detail-title")).toBeVisible();
+  await expect(page.locator(".mix-place-detail")).toContainText(/第\d+话|集数时间待补充/u);
+  const sceneImage = page.locator(".mix-scene-grid img").first();
+  if (await sceneImage.count()) await expect(sceneImage).toHaveAttribute("src", /plan=h360/u);
+
+  await page.getByRole("button", { name: "批量选择" }).click();
+  const choices = page.getByRole("list", { name: "批量选择地点" }).getByRole("checkbox");
+  await choices.nth(0).check();
+  await choices.nth(1).check();
+  await expect(page.getByText("已选 2 个地点")).toBeVisible();
+  await page.getByRole("button", { name: "批量加入" }).click();
+  await expect(page.getByRole("dialog", { name: "应用这次修改？" })).toBeVisible();
+  await expect(page.getByText(/PlanPatch|invalidated|stable_refs/u)).toHaveCount(0);
+  await page.getByRole("button", { name: "取消" }).click();
 
   const screenshotName = testInfo.project.name.startsWith("mobile")
     ? "phase-3-mobile.png"

@@ -409,3 +409,31 @@
 - Added `make verify-remediation`; remediation scenarios A-J pass and write both Markdown and JSON reports.
 - Fixed two aggregate compatibility regressions discovered only by legacy gates: premature Route A heading exposure and fixture/live point-ID divergence in Route B. The latter now bounds matrix candidates and preserves complete omission accounting.
 - Final `make verify-all` passed with exit code 0 in 652.4 seconds: all historical phase reports, clean Compose recovery, 131 Python tests at 80.41% coverage, 8 Web tests, 10 full desktop/mobile E2E tests, real SQL/E5 RAG smoke, and remediation A-J.
+
+### 2026-07-15 - Phase 15 single-flow conversation UX
+
+- **Status:** in progress
+- User screenshot review identified internal terminology and a one-title-per-line restriction in the initial Agent prompt.
+- User clarified that two visible product flows must not coexist; the legacy UI will be removed from the page while backend compatibility remains isolated.
+- A second screenshot showed a world-scale, oversized mobile map. The fix will reduce its visual height and default planned workspaces to scheduled locations so remote omitted candidates do not control the viewport.
+- User requested an Anitabi-like marker detail experience; selected places will progressively reveal scene references and images without exposing internal provider terminology.
+- User screenshots confirmed that workspace IDs, raw status enums, and Agent-to-Agent handoff diagnostics are unnecessary in the product UI; these will be removed rather than relabelled.
+- Verified the official screenshot-detail contract: validated thumbnail URL, episode/time, origin text, and origin link are available. Implementation will request/display the documented mobile `h360` image variant and preserve attribution.
+- User requested bulk point operations. The map will gain an explicit multi-select mode and one batch PlanPatch preview for all selected places.
+- Traced workspace creation and confirmed that the opening request is not stored in the conversation event stream; persistence will be added so the interaction reads as one continuous dialogue.
+- Removed the legacy React application from the product entry point and began replacing legacy-labelled tests with single-workspace acceptance.
+- Added validated scene image URLs end-to-end, persisted the opening user/assistant exchange, removed visible IDs/status/handoffs, added batch selection UI, and replaced internal patch diagnostics with user-facing impact copy.
+- Phase 15 static/focused checks pass: Python/Web lint, strict Python/Web typing, 23 focused Python tests, and 6 Web unit tests.
+### 2026-07-15 - Phase 15 final inspection
+
+- Confirmed the latest user-facing copy patch is present and no provider/orchestration terminology is rendered by the workspace.
+- Confirmed batch selection creates a single patch containing one operation for every selected place; end-to-end browser verification is next.
+- Re-ran lint, strict typechecking, 23 focused Python tests, and 6 Web unit tests; all passed.
+- The first Compose rebuild attempt exceeded the command's two-minute wrapper timeout without emitting a failure. The existing healthy stack remains available; retrying the build with a longer bounded timeout and plain progress output.
+- Rebuilt the API and Web images and confirmed all four Compose services healthy. `wait_compose.py` succeeds when `TEMP`/`TMP` point at the repository's writable `.tmp-conda` directory.
+- Browser verification found and fixed mobile marker overlap as a batch-selection blocker by adding a scrollable checkbox list, select-all, and clear controls. One combined preview now contains all selected points.
+- Removed internal patch and planner node names from persisted assistant replies after the browser transcript exposed them.
+- The focused desktop/mobile browser suite now passes all 10 scenarios, including three-point batch submission and reload-persistent natural conversation.
+- The first aggregate run passed Phases 1-3 and then exposed a Phase 4 mobile-only MapLibre overlap flake: another marker intercepted the physical click. Batch acceptance now uses the accessible checkbox surface, while scene-detail acceptance dispatches to the selected marker explicitly.
+- Replaced the flaky marker-only detail path with an always-available, collapsible, scrollable “浏览当前地点” list. Desktop/mobile detail acceptance passed 6/6 repeated runs before the aggregate rerun.
+- Final `make verify-all` passed in 436.7 seconds: all six phase reports, 132 Python tests at 80.43% coverage, 6 Web unit tests, 10 desktop/mobile E2E tests, clean Compose recovery, real E5/pgvector checks, secret/privacy scans, and remediation A-J.

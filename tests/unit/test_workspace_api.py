@@ -220,7 +220,12 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
     assert status_message.json()["preview"] is None
     assert "已确认 1 部作品" in status_message.json()["assistant_message"]["content"]
     assert restored_messages.status_code == 200
-    assert [item["role"] for item in restored_messages.json()] == ["user", "assistant"]
+    assert [item["role"] for item in restored_messages.json()] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
     assert stale.status_code == 409
     assert patch_preview.status_code == 200
     assert patch_preview.json()["preview"]["impact"]["validation_required"] is True
@@ -249,8 +254,13 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
         }
     ]
     assert conversational_patch.json()["workspace"]["pending_patch_id"] is not None
+    assistant_copy = conversational_patch.json()["assistant_message"]["content"]
+    assert "PlanPatch" not in assistant_copy
+    assert "itinerary_planner" not in assistant_copy
     assert [event.event_type for event in store.events[start_request.trip_id]] == [
         "workspace_started",
+        "conversation_message",
+        "conversation_message",
         "workspace_subjects_confirmed",
         "workspace_planned",
         "conversation_message",

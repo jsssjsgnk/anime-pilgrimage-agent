@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-14T14:42:41.315515+00:00",
+  "generated_at": "2026-07-14T16:25:59.564065+00:00",
   "status": "PASS",
   "checks": [
     {
@@ -35,7 +35,7 @@
     {
       "name": "mixed-workspace Web tests",
       "passed": true,
-      "evidence": "Workspace start, confirmation, planning, patch, pending recovery and legacy tests."
+      "evidence": "Single-workspace start, confirmation, planning, patch, pending recovery, and compatibility tests."
     }
   ],
   "scenarios": {

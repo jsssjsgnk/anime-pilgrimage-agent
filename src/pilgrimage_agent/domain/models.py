@@ -162,6 +162,7 @@ class PilgrimagePoint(StrictModel):
     latitude: Latitude
     longitude: Longitude
     episode_refs: tuple[str, ...] = ()
+    image_url: HttpUrl | None = None
     confidence: Literal["verified", "community", "unverified"]
     source_label: str | None = Field(default=None, max_length=200)
     provenance: DataProvenance

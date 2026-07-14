@@ -11,7 +11,17 @@ export interface SubjectGroup {
 export interface SubjectAppearance { subject_id: string; evidence_ids: string[] }
 export interface VisitPlace {
   place_id: string; canonical_name: string; coordinate: Coordinate;
-  verification_status: string; subject_appearances: SubjectAppearance[];
+  verification_status: string; scene_evidence_ids: string[]; subject_appearances: SubjectAppearance[];
+}
+export interface SceneEvidence {
+  evidence_id: string; subject_id: string; names: string[]; description: string | null;
+  episode_refs: string[]; image_url: string | null; source_url: string | null;
+  source_label: string | null; resolution_status: string;
+}
+export interface WorkspaceEvidenceView {
+  trip_id: string; evidence: SceneEvidence[];
+  quarantined: { evidence_id: string; reason_code: string; detail: string }[];
+  ambiguous_merges: unknown[];
 }
 export interface AreaCluster {
   area_id: string; label: string; place_ids: string[]; confidence: number;

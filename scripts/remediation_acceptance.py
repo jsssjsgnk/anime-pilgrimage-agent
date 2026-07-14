@@ -1,4 +1,4 @@
-"""Authoritative A-J remediation acceptance, separate from legacy phase gates."""
+"""Authoritative A-J remediation acceptance, extending the six phase gates."""
 
 from __future__ import annotations
 
@@ -224,7 +224,10 @@ def main() -> int:
         run(
             "mixed-workspace Web tests",
             [pnpm, "--filter", "@pilgrimage/web", "test"],
-            "Workspace start, confirmation, planning, patch, pending recovery and legacy tests.",
+            (
+                "Single-workspace start, confirmation, planning, patch, "
+                "pending recovery, and compatibility tests."
+            ),
         ),
     ]
     write_report(results)

@@ -77,6 +77,7 @@ def evidence_from_point(
         coordinate=GeoCoordinate(latitude=point.latitude, longitude=point.longitude),
         names=(point.name,),
         episode_refs=point.episode_refs,
+        image_url=point.image_url,
         source_url=point.provenance.source_url,
         source_label=point.source_label,
         provenance=point.provenance,

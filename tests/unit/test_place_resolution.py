@@ -159,6 +159,7 @@ def test_legacy_point_adapter_is_stable_and_preserves_source() -> None:
         latitude=35.6611,
         longitude=139.6681,
         episode_refs=("第8话",),
+        image_url="https://image.anitabi.cn/points/328609/fixture.jpg?plan=h160",
         confidence="community",
         source_label="Anitabi",
         provenance=_provenance("anitabi"),
@@ -171,3 +172,4 @@ def test_legacy_point_adapter_is_stable_and_preserves_source() -> None:
     assert first.provider == "anitabi"
     assert first.provider_record_id == str(point.id)
     assert first.episode_refs == ("第8话",)
+    assert str(first.image_url).endswith("fixture.jpg?plan=h160")
