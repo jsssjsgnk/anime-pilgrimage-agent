@@ -1,5 +1,6 @@
 """The product Workspace is checkpointed and reviewed by its real graph."""
 
+import asyncio
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import cast
@@ -74,16 +75,27 @@ class CountingReviewer:
     def __init__(self, *, revise: bool = False) -> None:
         self.calls: list[ReviewerInput] = []
         self.revise = revise
+        self.active_calls = 0
+        self.max_active_calls = 0
 
     async def review(self, request: ReviewerInput) -> ReviewerOutput:
         self.calls.append(request)
-        if self.revise and len(self.calls) == 1:
+        should_revise = self.revise and len(self.calls) == 1
+        self.active_calls += 1
+        self.max_active_calls = max(self.max_active_calls, self.active_calls)
+        try:
+            await asyncio.sleep(0.005)
+            if should_revise:
+                return ReviewerOutput(
+                    action="revise",
+                    target_day=1,
+                    explanation="Inspect only day one and preserve every stable day.",
+                )
             return ReviewerOutput(
-                action="revise",
-                target_day=1,
-                explanation="Inspect only day one and preserve every stable day.",
+                action="accept", explanation="The bounded plan is coherent."
             )
-        return ReviewerOutput(action="accept", explanation="The bounded plan is coherent.")
+        finally:
+            self.active_calls -= 1
 
 
 class TargetedReplanner:
@@ -153,28 +165,39 @@ class RecordingFixtureTools(FixtureAgentToolClient):
     def __init__(self) -> None:
         super().__init__()
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.active_calls = 0
+        self.max_active_calls = 0
 
     async def call(
         self, name: str, arguments: Mapping[str, object]
     ) -> dict[str, object]:
         self.calls.append((name, dict(arguments)))
-        if name == "geocode_place":
-            provenance = {
-                "provider": "fixture-geocoder",
-                "fetched_at": datetime.now(UTC).isoformat(),
-                "status": "estimated",
-            }
-            return {
-                "candidates": (
-                    {
-                        "label": "新宿",
-                        "coordinate": {"latitude": 35.6909, "longitude": 139.7003},
-                        "provenance": provenance,
-                    },
-                ),
-                "provenance": provenance,
-            }
-        return await super().call(name, arguments)
+        self.active_calls += 1
+        self.max_active_calls = max(self.max_active_calls, self.active_calls)
+        try:
+            await asyncio.sleep(0.005)
+            if name == "geocode_place":
+                provenance = {
+                    "provider": "fixture-geocoder",
+                    "fetched_at": datetime.now(UTC).isoformat(),
+                    "status": "estimated",
+                }
+                return {
+                    "candidates": (
+                        {
+                            "label": "新宿",
+                            "coordinate": {
+                                "latitude": 35.6909,
+                                "longitude": 139.7003,
+                            },
+                            "provenance": provenance,
+                        },
+                    ),
+                    "provenance": provenance,
+                }
+            return await super().call(name, arguments)
+        finally:
+            self.active_calls -= 1
 
 
 def _start_request() -> WorkspaceStartRequest:
@@ -271,8 +294,9 @@ async def test_area_builder_adds_bounded_transit_edges_between_nearby_areas() ->
 async def test_workspace_graph_resumes_checkpoint_and_calls_reviewer() -> None:
     saver = InMemorySaver()
     reviewer = CountingReviewer()
+    tools = RecordingFixtureTools()
     agent = WorkspaceAgent(
-        RecordingFixtureTools(),
+        tools,
         knowledge_retriever=FixtureKnowledgeRetriever(),
         knowledge_rule_proposer=FixtureKnowledgeRuleProposer(),
     )
@@ -336,6 +360,7 @@ async def test_workspace_graph_resumes_checkpoint_and_calls_reviewer() -> None:
     )
     planned = _workspace(final)
     assert reviewer.calls
+    assert reviewer.max_active_calls == len(planned.planning_strategies)
     assert planned.reviewer_assessments
     assert {item.role.value for item in planned.contexts} >= {
         "requirement",
@@ -361,6 +386,7 @@ async def test_workspace_graph_resumes_checkpoint_and_calls_reviewer() -> None:
         item for item in planned.handoffs if item.receiver.value == "weather"
     ).status == "partial"
     assert planned.knowledge_evidence
+    assert tools.max_active_calls >= 2
     assert planned.knowledge_rules[0].status == "proposed"
     assert next(
         item for item in planned.handoffs if item.receiver.value == "knowledge"

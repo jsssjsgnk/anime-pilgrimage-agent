@@ -598,3 +598,25 @@
 - The user replaced mechanical full-gate reruns with layered validation. The in-progress Phase 5
   gate was terminated without a result; `make verify-all` was not run for this small fix. No live
   Provider smoke was required because no Provider boundary changed.
+
+## 2026-07-15 - Phase 21 planning recovery and latency
+
+- Reproduced the current user flow against healthy Compose services: consecutive planning
+  requests returned HTTP 409 after successful place patch preview/apply operations.
+- Traced the failure to drift between the newly persisted database workspace version and the old
+  LangGraph interrupt checkpoint. Planning currently resumes the stale checkpoint without the
+  subject-confirmation path's rebase protection.
+- Started a focused correction covering plan-time checkpoint recovery, a patch-before-plan API
+  regression, and critical-path latency profiling. Full phase gates remain intentionally deferred
+  under the user's layered-validation policy.
+- Added plan-time checkpoint self-healing from the authoritative persisted workspace. A place
+  patch before the first plan now rebases the graph to the typed access/base interrupt and resumes
+  normally instead of returning a permanent version conflict.
+- Bounded place-fact lookups to four concurrent pipelines, ran independent place/weather/knowledge
+  collection concurrently, and reviewed the two strategy itineraries concurrently. Deterministic
+  ordering, validation, provenance, Handoff lifecycle, and safe partial results remain intact.
+- Focused verification passed: Ruff, strict mypy, 18 Workspace Agent/Graph/API/Repository tests,
+  rebuilt API Compose health, and the actual previously failing 244-place workspace. The real
+  request returned 200 in 6.47 seconds and persisted two plans plus two Reviewer assessments.
+- No Web source changed, so desktop/mobile Playwright was intentionally not rerun under the
+  layered-validation policy. No Provider contract changed and no new live Provider smoke was run.

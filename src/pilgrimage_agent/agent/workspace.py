@@ -1424,80 +1424,98 @@ class WorkspaceAgent:
         warnings = list(state.warnings)
         facts = dict(state.place_facts)
         snapshots = list(state.provider_snapshots)
-        for place in ordered[:12]:
-            query = PlaceFactsSearchQuery(
-                query=place.canonical_name,
-                coordinate_hint=place.coordinate,
-                limit=3,
-            )
-            search_outcome = await invoke_tool(
-                self.tools,
-                "search_place_facts",
-                query.model_dump(mode="json"),
-                PlaceFactsResult,
-            )
-            selected: PlaceFact | None = None
-            if search_outcome.value is not None:
-                selected = next(
-                    (
-                        item
-                        for item in search_outcome.value.candidates
-                        if item.match_confidence >= 0.85
-                        and item.coordinate is not None
-                        and haversine_meters(place.coordinate, item.coordinate) <= 1_500
-                    ),
-                    None,
+        semaphore = asyncio.Semaphore(4)
+
+        async def fetch_place(
+            place: VisitPlace,
+        ) -> tuple[UUID, PlaceFact | None, ProviderSnapshot, tuple[str, ...]]:
+            async with semaphore:
+                query = PlaceFactsSearchQuery(
+                    query=place.canonical_name,
+                    coordinate_hint=place.coordinate,
+                    limit=3,
                 )
-                warnings.extend(search_outcome.value.warnings)
-            if selected is None:
-                search_warning = search_outcome.safe_warning or (
-                    f"Current place facts for {place.canonical_name} were not matched "
-                    "confidently; no opening constraint was assumed."
+                search_outcome = await invoke_tool(
+                    self.tools,
+                    "search_place_facts",
+                    query.model_dump(mode="json"),
+                    PlaceFactsResult,
                 )
-                warnings.append(search_warning)
-                snapshots.append(
+                selected: PlaceFact | None = None
+                result_warnings = (
+                    search_outcome.value.warnings
+                    if search_outcome.value is not None
+                    else ()
+                )
+                if search_outcome.value is not None:
+                    selected = next(
+                        (
+                            item
+                            for item in search_outcome.value.candidates
+                            if item.match_confidence >= 0.85
+                            and item.coordinate is not None
+                            and haversine_meters(place.coordinate, item.coordinate) <= 1_500
+                        ),
+                        None,
+                    )
+                if selected is None:
+                    search_warning = search_outcome.safe_warning or (
+                        f"Current place facts for {place.canonical_name} were not matched "
+                        "confidently; no opening constraint was assumed."
+                    )
+                    return (
+                        place.place_id,
+                        None,
+                        ProviderSnapshot(
+                            kind="place",
+                            query_fingerprint=request_fingerprint(
+                                "searchapi-place-search", query
+                            ),
+                            status="unavailable",
+                            provenance=search_outcome.provenance,
+                            warning=search_warning,
+                        ),
+                        (*result_warnings, search_warning),
+                    )
+                detail_query = PlaceDetailsQuery(
+                    place_id=selected.place_id,
+                    data_id=None if selected.place_id else selected.data_id,
+                )
+                detail_outcome = await invoke_tool(
+                    self.tools,
+                    "get_place_facts",
+                    detail_query.model_dump(mode="json"),
+                    PlaceFactsResult,
+                )
+                fact = (
+                    detail_outcome.value.candidates[0]
+                    if detail_outcome.value is not None
+                    and detail_outcome.value.candidates
+                    else selected
+                )
+                detail_warning = detail_outcome.safe_warning
+                return (
+                    place.place_id,
+                    fact,
                     ProviderSnapshot(
                         kind="place",
                         query_fingerprint=request_fingerprint(
-                            "searchapi-place-search", query
+                            "searchapi-place-detail", detail_query
                         ),
-                        status="unavailable",
-                        provenance=search_outcome.provenance,
-                        warning=search_warning,
-                    )
-                )
-                continue
-            detail_query = PlaceDetailsQuery(
-                place_id=selected.place_id,
-                data_id=None if selected.place_id else selected.data_id,
-            )
-            detail_outcome = await invoke_tool(
-                self.tools,
-                "get_place_facts",
-                detail_query.model_dump(mode="json"),
-                PlaceFactsResult,
-            )
-            fact = (
-                detail_outcome.value.candidates[0]
-                if detail_outcome.value is not None and detail_outcome.value.candidates
-                else selected
-            )
-            facts[place.place_id] = fact
-            detail_warning = detail_outcome.safe_warning
-            if detail_warning:
-                warnings.append(detail_warning)
-            snapshots.append(
-                ProviderSnapshot(
-                    kind="place",
-                    query_fingerprint=request_fingerprint(
-                        "searchapi-place-detail", detail_query
+                        status="ok" if detail_outcome.value is not None else "partial",
+                        provenance=detail_outcome.provenance or search_outcome.provenance,
+                        result_refs=(_ref("place_fact", place.place_id),),
+                        warning=detail_warning,
                     ),
-                    status="ok" if detail_outcome.value is not None else "partial",
-                    provenance=detail_outcome.provenance or search_outcome.provenance,
-                    result_refs=(_ref("place_fact", place.place_id),),
-                    warning=detail_warning,
+                    (*result_warnings, *((detail_warning,) if detail_warning else ())),
                 )
-            )
+
+        results = await asyncio.gather(*(fetch_place(place) for place in ordered[:12]))
+        for place_id, fact, snapshot, result_warnings in results:
+            if fact is not None:
+                facts[place_id] = fact
+            snapshots.append(snapshot)
+            warnings.extend(result_warnings)
         if len(ordered) > 12:
             warnings.append(
                 f"Current place facts were checked for 12 of {len(ordered)} places; "
@@ -1508,6 +1526,44 @@ class WorkspaceAgent:
                 "place_facts": facts,
                 "provider_snapshots": tuple(snapshots),
                 "warnings": tuple(dict.fromkeys(warnings)),
+            }
+        )
+
+    async def collect_live_constraints(
+        self, state: WorkspaceState, request: PlanWorkspaceRequest
+    ) -> WorkspaceState:
+        """Collect independent live facts concurrently and merge bounded outputs."""
+
+        place_state, weather_state, knowledge_state = await asyncio.gather(
+            self.collect_place_facts(state),
+            self.collect_weather(state, request),
+            self.collect_knowledge_constraints(state),
+        )
+        snapshots: list[ProviderSnapshot] = []
+        seen_snapshot_ids: set[UUID] = set()
+        for branch in (state, place_state, weather_state, knowledge_state):
+            for snapshot in branch.provider_snapshots:
+                if snapshot.snapshot_id not in seen_snapshot_ids:
+                    snapshots.append(snapshot)
+                    seen_snapshot_ids.add(snapshot.snapshot_id)
+        warnings = tuple(
+            dict.fromkeys(
+                warning
+                for branch in (state, place_state, weather_state, knowledge_state)
+                for warning in branch.warnings
+            )
+        )
+        return state.model_copy(
+            update={
+                "place_facts": place_state.place_facts,
+                "weather_forecast": weather_state.weather_forecast,
+                "knowledge_evidence": knowledge_state.knowledge_evidence,
+                "knowledge_evidence_documents": (
+                    knowledge_state.knowledge_evidence_documents
+                ),
+                "knowledge_rules": knowledge_state.knowledge_rules,
+                "provider_snapshots": tuple(snapshots),
+                "warnings": warnings,
             }
         )
 

@@ -678,6 +678,29 @@ async def _rebase_subject_confirmation(
     await graph.ainvoke(None, updated_config)
 
 
+async def _rebase_plan_confirmation(
+    graph: WorkspaceGraph, state: WorkspaceState
+) -> None:
+    """Move a database-newer workspace to its typed access/base interrupt."""
+
+    config = _workspace_graph_config(
+        state.owner_user_id,
+        state.thread_id,
+        state.trip_id,
+    )
+    updated_config = await graph.aupdate_state(
+        config,
+        {
+            "workspace": state.model_dump(mode="json"),
+            "phase": "access_agent",
+        },
+        as_node="access_agent",
+    )
+    # Record the typed planning interrupt before the caller resumes it. This
+    # also repairs workspaces whose persisted PlanPatch is newer than the graph.
+    await graph.ainvoke(None, updated_config)
+
+
 def _workspace_from_graph(result: object) -> WorkspaceState:
     raw = cast(WorkspaceGraphState, result)
     return WorkspaceState.model_validate(raw["workspace"])
@@ -1204,9 +1227,26 @@ async def plan_workspace(trip_id: UUID, request: PlanWorkspaceRequest) -> Worksp
         try:
             if request.expected_state_version != state.state_version:
                 raise ValueError("workspace state version conflict")
+            checkpoint_config = _workspace_graph_config(
+                request.owner_user_id,
+                request.thread_id,
+                trip_id,
+            )
+            snapshot = await graph.aget_state(checkpoint_config)
+            checkpoint_workspace = (
+                _workspace_from_graph(snapshot.values)
+                if "workspace" in snapshot.values
+                else None
+            )
+            if (
+                checkpoint_workspace is None
+                or checkpoint_workspace.state_version != state.state_version
+                or snapshot.next != ("confirm_access_and_base",)
+            ):
+                await _rebase_plan_confirmation(graph, state)
             result = await graph.ainvoke(
                 Command(resume=request.model_dump(mode="json")),
-                _workspace_graph_config(request.owner_user_id, request.thread_id, trip_id),
+                checkpoint_config,
             )
             updated = _workspace_from_graph(result)
         except ValueError as error:

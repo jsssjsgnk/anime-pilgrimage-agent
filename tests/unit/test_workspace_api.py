@@ -128,12 +128,45 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
             f"/api/workspaces/{trip_id}/evidence",
             params={"owner_user_id": "user-a", "thread_id": "thread-a"},
         )
+        preplan_place_id = confirmed_body["places"][0]["place_id"]
+        preplan_preview = await client.post(
+            f"/api/workspaces/{trip_id}/patches/preview",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "patch": {
+                    "trip_id": trip_id,
+                    "expected_base_version": confirmed_body["state_version"],
+                    "operations": [
+                        {
+                            "op": "place",
+                            "action": "include",
+                            "place_id": preplan_place_id,
+                        }
+                    ],
+                    "rationale": "confirm one place before planning",
+                    "requires_confirmation": False,
+                    "idempotency_key": "api:preplan-place",
+                    "created_at": "2030-01-01T00:00:00Z",
+                },
+            },
+        )
+        preplan_patch_id = preplan_preview.json()["preview"]["patch"]["patch_id"]
+        preplan_applied = await client.post(
+            f"/api/workspaces/{trip_id}/patches/{preplan_patch_id}/apply",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "confirm": False,
+            },
+        )
+        preplan_body = preplan_applied.json()
         planned = await client.post(
             f"/api/workspaces/{trip_id}/plan",
             json={
                 "owner_user_id": "user-a",
                 "thread_id": "thread-a",
-                "expected_state_version": confirmed_body["state_version"],
+                "expected_state_version": preplan_body["state_version"],
                 "base_id": confirmed_body["base_candidates"][0]["base_id"],
             },
         )
@@ -320,6 +353,8 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
     assert isolated.status_code == 404
     assert evidence.status_code == 200
     assert len(evidence.json()["evidence"]) == 3
+    assert preplan_preview.status_code == 200
+    assert preplan_applied.status_code == 200
     assert planned.status_code == 200
     assert len(planned.json()["itineraries"]) == 2
     assert status_message.status_code == 200
@@ -395,6 +430,8 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
         "conversation_message",
         "conversation_message",
         "workspace_subjects_confirmed",
+        "workspace_patch_proposed",
+        "workspace_patch_applied",
         "workspace_planned",
         "conversation_message",
         "conversation_message",

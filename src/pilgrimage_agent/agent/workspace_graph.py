@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any, Literal, TypedDict, cast
 from uuid import UUID, uuid4
@@ -345,7 +346,9 @@ def build_workspace_graph(
         return {"phase": "live_constraint_handoffs_running", "workspace": _dump(workspace)}
 
     async def place_facts_agent(state: WorkspaceGraphState) -> WorkspaceGraphState:
-        workspace = await agent.collect_place_facts(_workspace(state))
+        workspace = await agent.collect_live_constraints(
+            _workspace(state), PlanWorkspaceRequest.model_validate(state["plan_request"])
+        )
         handoff_id = UUID(state["place_facts_handoff_id"])
         handoff = next(item for item in workspace.handoffs if item.handoff_id == handoff_id)
         result_refs = tuple(
@@ -374,9 +377,7 @@ def build_workspace_graph(
         return {"phase": "place_facts_agent", "workspace": _dump(workspace)}
 
     async def weather_agent(state: WorkspaceGraphState) -> WorkspaceGraphState:
-        workspace = await agent.collect_weather(
-            _workspace(state), PlanWorkspaceRequest.model_validate(state["plan_request"])
-        )
+        workspace = _workspace(state)
         handoff_id = UUID(state["weather_handoff_id"])
         handoff = next(item for item in workspace.handoffs if item.handoff_id == handoff_id)
         forecast = workspace.weather_forecast
@@ -410,7 +411,7 @@ def build_workspace_graph(
         return {"phase": "weather_agent", "workspace": _dump(workspace)}
 
     async def knowledge_agent(state: WorkspaceGraphState) -> WorkspaceGraphState:
-        workspace = await agent.collect_knowledge_constraints(_workspace(state))
+        workspace = _workspace(state)
         handoff_id = UUID(state["knowledge_handoff_id"])
         handoff = next(item for item in workspace.handoffs if item.handoff_id == handoff_id)
         result_refs = (
@@ -515,23 +516,27 @@ def build_workspace_graph(
             status: Literal["completed", "partial", "failed"] = "partial"
         else:
             try:
-                for itinerary in active:
-                    output = await reviewer.review(
-                        ReviewerInput(
-                            context_snapshot_id=str(
-                                next(
-                                    item.context_id
-                                    for item in reversed(workspace.contexts)
-                                    if item.refs
-                                    and item.refs[0].entity_id == str(itinerary.itinerary_id)
-                                )
-                            ),
-                            deterministic_violations=tuple(
-                                issue.code for issue in itinerary.validation_issues
-                            ),
-                            revision_count=state.get("revision_count", 0),
-                        )
+                review_inputs = tuple(
+                    ReviewerInput(
+                        context_snapshot_id=str(
+                            next(
+                                item.context_id
+                                for item in reversed(workspace.contexts)
+                                if item.refs
+                                and item.refs[0].entity_id == str(itinerary.itinerary_id)
+                            )
+                        ),
+                        deterministic_violations=tuple(
+                            issue.code for issue in itinerary.validation_issues
+                        ),
+                        revision_count=state.get("revision_count", 0),
                     )
+                    for itinerary in active
+                )
+                outputs = await asyncio.gather(
+                    *(reviewer.review(review_input) for review_input in review_inputs)
+                )
+                for itinerary, output in zip(active, outputs, strict=True):
                     assessments.append(
                         WorkspaceReviewerAssessment(
                             itinerary_id=itinerary.itinerary_id,

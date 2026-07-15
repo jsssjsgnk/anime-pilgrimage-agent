@@ -321,6 +321,16 @@ Phase 20 in progress — large batch itinerary mutations and safe validation fee
 - Never book, pay, deploy, publish, message externally, or create external resources without explicit authorization.
 - Use only the `anime-pilgrimage-agent` Conda environment and repository-scoped Docker resources.
 - Preserve unrelated changes and never use destructive Git commands.
+
+## Phase 21: planning recovery and latency
+
+- [x] Reproduce the current planning failure and identify database/checkpoint version drift.
+- [x] Rebase a stale planning checkpoint from the authoritative persisted workspace before resume.
+- [x] Add a regression for applying place changes before the first planning request.
+- [x] Profile the planning critical path and remove avoidable serialized/repeated work without weakening Agent review or constraints.
+- [x] Add focused latency/dispatch regressions and run Python/API static and targeted tests.
+- [x] Rebuild only the API service and verify the real planning-after-patch workspace.
+- [x] Record actual tests and any unverified live boundaries; commit and push the focused change.
 - [x] Integrate read-only flight/transit/place/weather facts into the authoritative Workspace graph with real Handoff lifecycle and bounded ProviderSnapshots.
 - [x] Correct the three-layer place/travel-area clustering and add ORS/transit calibration.
 - [x] Upgrade Planner/Validator to consume access windows, opening hours, weather risk, and real matrices.

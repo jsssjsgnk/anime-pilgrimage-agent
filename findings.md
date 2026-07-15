@@ -438,3 +438,27 @@
 - Per the user's updated layered-validation policy, the subsequently started full Phase 5 gate
   was intentionally stopped while still running. It produced no completion result and is not
   claimed as PASS; the last unaffected Phase 5 result remains historical regression evidence.
+
+## 2026-07-15 Phase 21 planning failure and latency diagnosis
+
+- The reported planning action is not merely slow: two current Compose requests to the workspace
+  planning endpoint returned HTTP 409.
+- Place PlanPatch application advances the authoritative database `WorkspaceState`, but only
+  subject-confirmation patches currently rebase the durable LangGraph checkpoint. The next plan
+  resume therefore compares the new request version with an older checkpoint workspace and
+  permanently fails with a state-version conflict.
+- The repair must be plan-time self-healing so already affected workspaces recover without being
+  recreated. It must preserve the database workspace as authoritative and resume at the typed
+  access/base confirmation boundary.
+- The user also requested the previously observed planning latency be addressed. Profiling and
+  optimization will follow the correctness repair and must retain Reviewer, deterministic
+  validation, provenance, and bounded tool behavior.
+- The main avoidable critical path was 12 bounded place-fact checks, each performing search then
+  detail in a fully serialized loop (up to 24 consecutive tool waits). Weather and knowledge then
+  ran after that loop, and the two independent itinerary Reviewer calls were also serialized.
+- A four-request semaphore now bounds place-fact concurrency. Place facts, weather, and knowledge
+  run concurrently and merge only their disjoint typed projections; both itinerary Reviewer calls
+  also run concurrently while retaining one assessment per strategy in stable order.
+- The previously failing real workspace recovered in place: its planning request returned HTTP
+  200 in 6.47 seconds, persisted state version 8 with status `planned`, two itinerary versions, and
+  two Reviewer assessments. No fixture result was substituted for this Compose check.
