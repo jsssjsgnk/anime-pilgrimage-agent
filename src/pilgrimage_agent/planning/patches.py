@@ -10,6 +10,7 @@ from pydantic import Field
 
 from pilgrimage_agent.domain.models import StrictModel, SubjectIntent
 from pilgrimage_agent.domain.workspace import (
+    BatchPlaceOperation,
     ImpactAnalysis,
     KnowledgeOperation,
     MergeDecisionOperation,
@@ -135,8 +136,13 @@ def analyze_impact(patch: PlanPatch) -> ImpactAnalysis:
                 }
             )
             reviewer = True
-        elif isinstance(operation, PlaceOperation):
-            invalidated.add(f"visit_place:{operation.place_id}")
+        elif isinstance(operation, PlaceOperation | BatchPlaceOperation):
+            place_ids = (
+                (operation.place_id,)
+                if isinstance(operation, PlaceOperation)
+                else operation.place_ids
+            )
+            invalidated.update(f"visit_place:{place_id}" for place_id in place_ids)
             if operation.action in {"move_day", "reorder"}:
                 nodes.update({"local_matrix", "day_assignment"})
                 invalidated.add(f"day:{operation.target_day}")

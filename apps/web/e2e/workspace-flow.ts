@@ -3,7 +3,7 @@ import { expect, type Page } from "@playwright/test";
 export async function startWorkspace(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: "开始规划" }).click();
-  await expect(page.getByRole("heading", { name: "作品匹配结果" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "作品匹配结果" })).toBeVisible({ timeout: 60_000 });
 }
 
 export async function confirmWorkspace(page: Page) {

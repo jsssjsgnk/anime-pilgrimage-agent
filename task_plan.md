@@ -4,7 +4,7 @@
 Implement the authoritative remediation specification across the real product path, preserve legacy compatibility/regressions, and finish only when scenarios A–J pass or a genuine user-only blocker is documented honestly.
 
 ## Current Phase
-Phase 17 in progress — arbitrary work discovery and recovery
+Phase 20 in progress — large batch itinerary mutations and safe validation feedback
 
 ## Phases
 
@@ -164,6 +164,16 @@ Phase 17 in progress — arbitrary work discovery and recovery
 - [x] Add unit, API, Web/E2E, and Compose acceptance for every independent work item
 - [x] Run focused gates after each work item and finish with the aggregate acceptance gate
 - **Status:** complete (`make verify-all` PASS; remediation A-J PASS)
+
+### Phase 20: Large batch itinerary mutations and safe validation feedback
+- [x] Reproduce the 109-place batch failure and trace the 25-operation schema limit
+- [x] Add a bounded batch-place operation that preserves one preview/apply/impact path
+- [x] Replace raw validation payloads with concise user-facing errors
+- [x] Add unit, API, Web, and browser regression coverage for more than 25 places
+- [x] Rebuild Compose and verify the exact 109-place interaction
+- [x] Run focused checks under the updated layered-validation policy
+- [x] Commit and push the focused correction
+- **Status:** complete under the layered-validation policy
 
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?

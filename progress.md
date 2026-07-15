@@ -573,3 +573,28 @@
 - Final `make verify-all` exited 0 in 2079 seconds and reran all six phase gates plus remediation
   A-J from the same working tree. Live SearchAPI transit/place checks remain explicitly unverified
   when live smoke is disabled; fixture contracts pass and no live PASS is fabricated.
+
+## 2026-07-15 - Phase 20 large-batch itinerary correction
+
+- Reproduced the reported failure from the raw response: 109 selected places were serialized as
+  109 patch operations, exceeding the strict 25-operation `PlanPatch` boundary.
+- Confirmed a second defect in the same path: the Web API helper displays structured 422 response
+  bodies verbatim instead of translating them into a safe, concise message.
+- Planned correction: one bounded batch-place operation, shared deterministic preview/apply logic,
+  safe error normalization, and regressions spanning domain/API/Web/browser behavior.
+- Implemented `place_batch` with a 2000-ID hard bound, uniqueness/target validation, complete
+  impact references, atomic Workspace application, JSON persistence, and one Web operation label.
+- Added a value-free FastAPI validation exception response and status/known-error normalization in
+  the Web; structured Pydantic arrays are no longer displayed or echoed.
+- Focused verification passed: 26 Python domain/Agent/API tests, 17 Web tests, Python/Web lint,
+  Python/TypeScript typechecks, a healthy rebuilt four-service Compose stack, and the real large
+  batch browser scenario on desktop and mobile.
+- One initial browser attempt timed out before this path because two live catalog lookups completed
+  at the old 30-second threshold. The shared start wait now allows 60 seconds, and the regression
+  directly uses the single-title K-On all-versions case to isolate the batch boundary.
+- Canonical focused commands passed: `make lint`, `make typecheck`, and `make test`; the latter ran
+  171 Python tests at 81.68% coverage and 17 Web tests. Compose health/database checks and the
+  targeted desktop/mobile Playwright scenario also passed.
+- The user replaced mechanical full-gate reruns with layered validation. The in-progress Phase 5
+  gate was terminated without a result; `make verify-all` was not run for this small fix. No live
+  Provider smoke was required because no Provider boundary changed.

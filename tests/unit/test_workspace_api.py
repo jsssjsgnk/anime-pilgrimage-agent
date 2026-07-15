@@ -287,6 +287,29 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
                 ],
             },
         )
+        large_batch_ids = [str(uuid4()) for _index in range(109)]
+        large_batch_preview = await client.post(
+            f"/api/workspaces/{trip_id}/patches/preview",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "patch": {
+                    "trip_id": trip_id,
+                    "expected_base_version": confirmed_added.json()["state_version"],
+                    "operations": [
+                        {
+                            "op": "place_batch",
+                            "action": "include",
+                            "place_ids": large_batch_ids,
+                        }
+                    ],
+                    "rationale": "一次加入当前区域的全部地点",
+                    "requires_confirmation": False,
+                    "idempotency_key": "api:large-place-batch",
+                    "created_at": "2030-01-01T00:00:00Z",
+                },
+            },
+        )
 
     assert started.status_code == 200
     assert "evidence" not in started_body
@@ -348,6 +371,15 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
     assert confirmed_added.status_code == 200
     assert confirmed_added.json()["state_version"] > added_body["state_version"]
     assert confirmed_added.json()["status"] != "awaiting_subject_confirmation"
+    assert large_batch_preview.status_code == 200
+    assert large_batch_preview.json()["preview"]["patch"]["operations"] == [
+        {
+            "op": "place_batch",
+            "action": "include",
+            "place_ids": large_batch_ids,
+            "target_day": None,
+        }
+    ]
     assert {
         item["intent_id"] for item in confirmed_added.json()["confirmed_subjects"]
     } == {
@@ -380,6 +412,7 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
         "conversation_message",
         "workspace_patch_applied",
         "workspace_subjects_confirmed",
+        "workspace_patch_proposed",
     ]
 
 

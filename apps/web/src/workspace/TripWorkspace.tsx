@@ -37,6 +37,8 @@ import type {
   WorkspaceEvidenceView,
   WorkspaceView,
 } from "./types";
+import { safeApiErrorMessage } from "./api-error";
+import { buildPlacePatchOperation } from "./patch-operations";
 
 const DEVELOPMENT_SESSION = getWorkspaceSession();
 const OWNER_ID = DEVELOPMENT_SESSION.ownerUserId;
@@ -59,9 +61,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ detail: response.statusText })) as { detail?: unknown };
-    const detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? body);
-    throw new Error(detail || `请求失败（${response.status}）`);
+    throw new Error(await safeApiErrorMessage(response));
   }
   return response.json() as Promise<T>;
 }
@@ -112,7 +112,9 @@ function operationLabel(operation: { op: string; [key: string]: unknown }) {
   if (operation.op === "subject_intent") {
     return operation.action === "add" ? "添加作品" : operation.action === "remove" ? "移除作品" : "调整作品";
   }
-  if (operation.op === "place") {
+  if (operation.op === "place" || operation.op === "place_batch") {
+    const count = Array.isArray(operation.place_ids) ? operation.place_ids.length : 1;
+    const prefix = count > 1 ? `${count} 个地点：` : "";
     const dayLabel = typeof operation.target_day === "number"
       ? operation.target_day.toString()
       : "?";
@@ -122,7 +124,7 @@ function operationLabel(operation: { op: string; [key: string]: unknown }) {
       move_day: `移到第 ${dayLabel} 天`,
       reorder: `调整第 ${dayLabel} 天的顺序`,
     };
-    return labels[String(operation.action)] ?? "调整地点";
+    return `${prefix}${labels[String(operation.action)] ?? "调整地点"}`;
   }
   const fields: Record<string, string> = {
     start_date: "修改开始日期",
@@ -537,7 +539,7 @@ export function TripWorkspace() {
       status: "proposed",
       idempotency_key: `web:${crypto.randomUUID()}`,
       created_at: new Date().toISOString(),
-      operations: places.map((place) => ({ op: "place", action, place_id: place.place_id, ...(targetDay ? { target_day: targetDay } : {}), ...(targetPosition !== undefined ? { target_position: targetPosition } : {}) })),
+      operations: [buildPlacePatchOperation(places, action, targetDay, targetPosition)],
     };
     setBusy(true); setError(null);
     try {

@@ -412,3 +412,29 @@
   14 serialized desktop/mobile E2E scenarios. `make verify-all` and remediation A-J both pass.
 - Live SearchAPI transit/place evidence is still honestly UNVERIFIED when live smoke is disabled;
   bounded fixture/provider contracts and deterministic unknown/partial behavior are verified.
+
+## 2026-07-15 Phase 20 large-batch failure diagnosis
+
+- The user-visible validation payload proves the batch UI submitted 109 individual
+  `PlaceOperation` objects while `PlanPatch.operations` is bounded to 25 items.
+- The limit is a useful LLM/tool-boundary guard and should not simply be raised to the size of
+  the current corpus. A dedicated bounded batch-place operation can represent one user action,
+  preserve the common preview/apply/impact path, and keep patch complexity explicit.
+- The Web request helper currently throws the response body verbatim for every non-2xx response.
+  FastAPI/Pydantic validation arrays therefore leak schema paths and internal UUID payloads into
+  the consumer interface. Error normalization must never render structured validation bodies.
+- The exact product regression is the largest current K-On travel area: 109 canonical places.
+  Acceptance must cover more than 25 selected places and verify one coherent preview rather than
+  splitting the user's action into partially applied requests.
+- The corrected boundary keeps `PlanPatch.operations` at 25 while adding one `place_batch`
+  operation with 2–2000 unique canonical IDs. Include, exclude, and move-day batches expand only
+  inside deterministic application and remain one persisted/idempotent patch.
+- FastAPI request validation now returns one value-free 422 detail, and the Web maps all unknown
+  validation bodies to concise Chinese copy. Neither schema locations nor submitted UUID arrays
+  enter the visible error surface.
+- Rebuilt Compose acceptance passed the real K-On all-versions workflow on desktop and mobile:
+  the current list contained more than 25 places, the request contained exactly one batch
+  operation covering the complete selection, and the preview dialog rendered successfully.
+- Per the user's updated layered-validation policy, the subsequently started full Phase 5 gate
+  was intentionally stopped while still running. It produced no completion result and is not
+  claimed as PASS; the last unaffected Phase 5 result remains historical regression evidence.

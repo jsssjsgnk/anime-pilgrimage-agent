@@ -406,6 +406,25 @@ class PlaceOperation(StrictModel):
         return self
 
 
+class BatchPlaceOperation(StrictModel):
+    """One atomic user action over a bounded set of canonical places."""
+
+    op: Literal["place_batch"] = "place_batch"
+    action: Literal["include", "exclude", "move_day"]
+    place_ids: tuple[UUID, ...] = Field(min_length=2, max_length=2000)
+    target_day: int | None = Field(default=None, ge=1, le=30)
+
+    @model_validator(mode="after")
+    def batch_matches_action(self) -> BatchPlaceOperation:
+        if len(set(self.place_ids)) != len(self.place_ids):
+            raise ValueError("batch place IDs must be unique")
+        if self.action == "move_day" and self.target_day is None:
+            raise ValueError("moving places requires a target day")
+        if self.action in {"include", "exclude"} and self.target_day is not None:
+            raise ValueError("include/exclude operations do not accept a target day")
+        return self
+
+
 class SelectionOperation(StrictModel):
     op: Literal["selection"] = "selection"
     action: Literal["change_access", "change_base", "change_strategy", "create_branch"]
@@ -441,6 +460,7 @@ PatchOperation = Annotated[
     UpdateRequirementOperation
     | SubjectIntentOperation
     | PlaceOperation
+    | BatchPlaceOperation
     | SelectionOperation
     | KnowledgeOperation
     | MergeDecisionOperation,

@@ -37,16 +37,35 @@ test("natural conversation previews a change and survives reload", async ({ page
 });
 
 test("bulk selection submits one combined preview", async ({ page }) => {
-  await planWorkspace(page);
+  await page.goto("/");
+  await page.getByLabel("你的巡礼想法").fill("我想用一天巡礼轻音少女");
+  await page.getByRole("button", { name: "开始规划" }).click();
+  await expect(page.getByRole("heading", { name: "作品匹配结果" })).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "选择全部季度与版本" }).click();
+  await page.getByRole("button", { name: "确认并整理地点" }).click();
+  await expect(page.getByRole("button", { name: "生成层级行程" })).toBeVisible({ timeout: 120_000 });
   await page.getByRole("button", { name: "批量选择" }).click();
   const choices = page.getByRole("list", { name: "批量选择地点" }).getByRole("checkbox");
-  expect(await choices.count()).toBeGreaterThan(2);
-  await choices.nth(0).check();
-  await choices.nth(1).check();
-  await choices.nth(2).check();
-  await expect(page.getByText("已选 3 个地点")).toBeVisible();
+  const count = await choices.count();
+  expect(count).toBeGreaterThan(25);
+  await page.getByRole("button", { name: "全选当前列表" }).click();
+  await expect(page.getByText(`已选 ${count} 个地点`)).toBeVisible();
+  const requestPromise = page.waitForRequest(
+    (request) => request.url().endsWith("/patches/preview")
+      && request.method() === "POST",
+  );
   await page.getByRole("button", { name: "批量排除" }).click();
+  const request = await requestPromise;
+  const payload = request.postDataJSON() as {
+    patch: { operations: { op: string; place_ids: string[] }[] };
+  };
+  expect(payload.patch.operations).toHaveLength(1);
+  expect(payload.patch.operations[0]).toMatchObject({
+    op: "place_batch",
+    place_ids: expect.arrayContaining([expect.any(String)]),
+  });
+  expect(payload.patch.operations[0]?.place_ids).toHaveLength(count);
   const dialog = page.getByRole("dialog", { name: "应用这次修改？" });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("从行程中排除、从行程中排除、从行程中排除");
+  await expect(dialog).toContainText(`${count} 个地点：从行程中排除`);
 });

@@ -12,7 +12,8 @@ from typing import Literal, cast
 from uuid import UUID, uuid4
 
 from anyio import to_thread
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -398,6 +399,20 @@ app = FastAPI(
     description="Read-only planning API; booking and payment are intentionally unsupported.",
     lifespan=_app_lifespan,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_request_validation_error(
+    _request: Request, _error: RequestValidationError
+) -> JSONResponse:
+    """Keep schema locations and submitted values out of consumer error responses."""
+
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Request body does not match the required structure."},
+    )
+
+
 RAG_FIXTURE_ROOT = Path.cwd() / "fixtures" / "rag"
 CONVERSATION_EVENT = "conversation_message"
 CONVERSATION_SUMMARY_EVENT = "conversation_summary"

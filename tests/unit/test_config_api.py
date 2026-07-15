@@ -78,3 +78,19 @@ def test_runtime_diagnostics_expose_no_configuration_values() -> None:
     serialized = response.text.lower()
     assert "authorization" not in serialized
     assert "api_key" not in serialized
+
+
+def test_request_validation_response_does_not_echo_schema_or_submitted_values() -> None:
+    marker = "0158d2ae-79b9-5033-924e-d092abbb4137"
+    response = TestClient(app).post(
+        "/api/workspaces",
+        json={"owner_user_id": marker, "unexpected": [{"secret-shaped": marker}]},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Request body does not match the required structure."
+    }
+    assert marker not in response.text
+    assert "loc" not in response.text
+    assert "input" not in response.text

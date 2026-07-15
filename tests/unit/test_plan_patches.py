@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from pilgrimage_agent.agent.context import RoleContextBuilder
 from pilgrimage_agent.domain.workspace import (
     AgentRole,
+    BatchPlaceOperation,
     ContextFact,
     EntityRef,
     PlaceOperation,
@@ -125,6 +126,30 @@ def test_operation_models_reject_incomplete_targets() -> None:
         PlaceOperation(action="move_day", place_id=uuid4())
     with pytest.raises(ValidationError, match="strategy changes"):
         SelectionOperation(action="change_strategy")
+
+
+def test_large_place_batch_is_one_bounded_operation_with_complete_impact() -> None:
+    place_ids = tuple(uuid4() for _index in range(109))
+    batch = BatchPlaceOperation(action="include", place_ids=place_ids)
+    patch = _patch(batch)
+
+    impact = analyze_impact(patch)
+
+    assert len(patch.operations) == 1
+    assert len(impact.invalidated_refs) == 109
+    assert set(impact.invalidated_refs) == {
+        f"visit_place:{place_id}" for place_id in place_ids
+    }
+    restored = PlanPatch.model_validate(patch.model_dump(mode="json"))
+    assert isinstance(restored.operations[0], BatchPlaceOperation)
+
+
+def test_place_batch_rejects_duplicate_and_incomplete_targets() -> None:
+    place_id = uuid4()
+    with pytest.raises(ValidationError, match="unique"):
+        BatchPlaceOperation(action="exclude", place_ids=(place_id, place_id))
+    with pytest.raises(ValidationError, match="target day"):
+        BatchPlaceOperation(action="move_day", place_ids=(uuid4(), uuid4()))
 
 
 def test_role_context_is_bounded_and_excludes_raw_categories() -> None:

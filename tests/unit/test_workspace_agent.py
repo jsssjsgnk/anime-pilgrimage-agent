@@ -34,6 +34,7 @@ from pilgrimage_agent.domain.models import (
 )
 from pilgrimage_agent.domain.workspace import (
     AgentRole,
+    BatchPlaceOperation,
     PlaceOperation,
     PlanPatch,
     SubjectIntentOperation,
@@ -605,6 +606,30 @@ async def test_patch_preview_apply_revalidate_diff_and_idempotency() -> None:
     assert any(item.role is AgentRole.REPLANNER for item in changed.contexts)
     retried = await agent.apply_patch(changed, preview.patch.patch_id, confirm=False)
     assert retried == changed
+
+
+@pytest.mark.asyncio
+async def test_batch_place_patch_applies_atomically_through_the_shared_path() -> None:
+    agent, planned = await _planned_workspace()
+    place_ids = tuple(item.place_id for item in planned.places)
+    assert len(place_ids) > 1
+    patch = PlanPatch(
+        trip_id=planned.trip_id,
+        expected_base_version=planned.state_version,
+        operations=(BatchPlaceOperation(action="exclude", place_ids=place_ids),),
+        rationale="暂不安排当前区域的全部地点",
+        requires_confirmation=False,
+        idempotency_key="fixture:batch-exclude",
+        created_at=datetime.now(UTC),
+    )
+
+    proposed, preview = agent.propose_patch(planned, patch)
+    changed = await agent.apply_patch(proposed, preview.patch.patch_id, confirm=False)
+
+    assert set(place_ids).issubset(changed.excluded_place_ids)
+    assert preview.impact.invalidated_refs == tuple(
+        sorted(f"visit_place:{place_id}" for place_id in place_ids)
+    )
 
 
 @pytest.mark.asyncio

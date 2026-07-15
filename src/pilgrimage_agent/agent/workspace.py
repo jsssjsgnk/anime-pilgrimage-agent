@@ -64,6 +64,7 @@ from pilgrimage_agent.domain.workspace import (
     AmbiguousPlaceMerge,
     AreaCluster,
     AreaTransitEdge,
+    BatchPlaceOperation,
     ContextFact,
     DerivedKnowledgeRule,
     EntityRef,
@@ -2465,25 +2466,41 @@ class WorkspaceAgent:
                         raise ValueError(
                             "subject confirmation uses the candidate confirmation endpoint"
                         )
-            elif isinstance(operation, PlaceOperation):
-                if operation.place_id not in {item.place_id for item in state.places}:
+            elif isinstance(operation, PlaceOperation | BatchPlaceOperation):
+                place_operations = (
+                    (operation,)
+                    if isinstance(operation, PlaceOperation)
+                    else tuple(
+                        PlaceOperation(
+                            action=operation.action,
+                            place_id=place_id,
+                            target_day=operation.target_day,
+                        )
+                        for place_id in operation.place_ids
+                    )
+                )
+                workspace_place_ids = {item.place_id for item in state.places}
+                if any(
+                    item.place_id not in workspace_place_ids for item in place_operations
+                ):
                     raise ValueError("place does not belong to the workspace")
-                changed_places.add(operation.place_id)
-                if operation.action == "include":
-                    excluded.discard(operation.place_id)
-                elif operation.action == "exclude":
-                    excluded.add(operation.place_id)
-                    must_visit.discard(operation.place_id)
-                elif operation.action == "move_day":
-                    assert operation.target_day is not None
-                    fixed_days[operation.place_id] = operation.target_day
-                    changed_days.add(operation.target_day)
-                else:
-                    assert operation.target_day is not None
-                    assert operation.target_position is not None
-                    fixed_days[operation.place_id] = operation.target_day
-                    fixed_positions[operation.place_id] = operation.target_position
-                    changed_days.add(operation.target_day)
+                for item in place_operations:
+                    changed_places.add(item.place_id)
+                    if item.action == "include":
+                        excluded.discard(item.place_id)
+                    elif item.action == "exclude":
+                        excluded.add(item.place_id)
+                        must_visit.discard(item.place_id)
+                    elif item.action == "move_day":
+                        assert item.target_day is not None
+                        fixed_days[item.place_id] = item.target_day
+                        changed_days.add(item.target_day)
+                    else:
+                        assert item.target_day is not None
+                        assert item.target_position is not None
+                        fixed_days[item.place_id] = item.target_day
+                        fixed_positions[item.place_id] = item.target_position
+                        changed_days.add(item.target_day)
             elif isinstance(operation, SelectionOperation):
                 if operation.action == "change_base":
                     assert operation.selection_id is not None
