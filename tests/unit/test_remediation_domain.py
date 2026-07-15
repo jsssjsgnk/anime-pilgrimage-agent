@@ -230,6 +230,7 @@ def test_handoff_and_knowledge_rule_boundaries_are_strict() -> None:
         status="completed",
         result_refs=(EntityRef(entity_type="itinerary", entity_id=str(uuid4())),),
         created_at=now,
+        started_at=now,
         completed_at=now,
     )
     assert handoff.completed_at == now

@@ -23,6 +23,7 @@ test-results/
 .cache/
 .tmp/
 .tmp-conda/
+.codex-tmp/
 .remediation-handoff/
 data/
 *.log

@@ -26,6 +26,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { ROUTE_MAP_STYLE_URL } from "../route-map-config";
 import { extractSubjectQueries } from "./intake";
+import { getWorkspaceSession } from "./session";
 import type {
   ConversationMessage,
   PatchPreview,
@@ -37,9 +38,11 @@ import type {
   WorkspaceView,
 } from "./types";
 
-const OWNER_ID = "local-web-user";
-const THREAD_ID = "local-workspace-thread";
-const STORAGE_KEY = "pilgrimage-workspace-v2";
+const DEVELOPMENT_SESSION = getWorkspaceSession();
+const OWNER_ID = DEVELOPMENT_SESSION.ownerUserId;
+const THREAD_ID = DEVELOPMENT_SESSION.threadId;
+const STORAGE_KEY = DEVELOPMENT_SESSION.tripStorageKey;
+const LEGACY_STORAGE_KEY = "pilgrimage-workspace-v2";
 
 type Stage = "conversation" | "map" | "context";
 type MapFilter = "all" | "scheduled" | "unscheduled";
@@ -68,15 +71,41 @@ function formatTime(value: string) {
 }
 
 function mobileSceneImage(value: string): string {
-  return value.replace(/([?&])plan=h160(?=&|$)/u, "$1plan=h360");
+  const url = new URL(value);
+  url.searchParams.set("plan", "h360");
+  return url.toString();
 }
 
 function sourceLabel(value: string | null): string {
   return value && !value.toLocaleLowerCase().includes("anitabi") ? value : "场景资料来源";
 }
 
+function pointSourceLabel(value: string): string {
+  if (value === "anitabi_static") return "静态地图资料";
+  if (value === "anitabi_detail") return "详情资料回退";
+  if (value.includes("fixture")) return "离线验收资料";
+  return "导入资料";
+}
+
 function strategyLabel(value: string): string {
   return value === "low_walking" ? "少走路" : value === "primary_subject_first" ? "优先主要作品" : "综合安排";
+}
+
+function userFacingWarning(value: string): string {
+  const normalized = value.toLocaleLowerCase();
+  if (normalized.includes("weather") || normalized.includes("forecast")) {
+    return "旅行日期的天气资料目前不在可靠范围内，请在出发前刷新确认。";
+  }
+  if (normalized.includes("walking") || normalized.includes("matrix")) {
+    return "部分步行时间暂时只能估算，实际游览时请以现场路线为准。";
+  }
+  if (normalized.includes("transit") || normalized.includes("flight") || normalized.includes("access")) {
+    return "部分交通资料暂时无法核实，出发前需要重新确认班次与耗时。";
+  }
+  if (normalized.includes("point") || normalized.includes("scene") || normalized.includes("evidence")) {
+    return "部分场景资料不完整，未核实的内容不会作为确定事实安排。";
+  }
+  return "部分辅助资料暂时不可用；当前行程只采用已经核实的内容。";
 }
 
 function operationLabel(operation: { op: string; [key: string]: unknown }) {
@@ -338,9 +367,12 @@ export function TripWorkspace() {
   const [showEvidence, setShowEvidence] = useState(false);
   const [editingSubjects, setEditingSubjects] = useState(false);
   const [newSubject, setNewSubject] = useState("");
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  const [editingRequirements, setEditingRequirements] = useState(false);
 
   useEffect(() => {
-    const tripId = window.sessionStorage.getItem(STORAGE_KEY);
+    const tripId = window.sessionStorage.getItem(STORAGE_KEY)
+      ?? window.sessionStorage.getItem(LEGACY_STORAGE_KEY);
     if (!tripId) return;
     setBusy(true);
     void Promise.all([
@@ -354,7 +386,10 @@ export function TripWorkspace() {
         if (restoredWorkspace.itineraries.length > 0) setFilter("scheduled");
         else setAreaFilter(preferredAreaId(restoredWorkspace));
       })
-      .catch(() => window.sessionStorage.removeItem(STORAGE_KEY))
+      .catch(() => {
+        window.sessionStorage.removeItem(STORAGE_KEY);
+        window.sessionStorage.removeItem(LEGACY_STORAGE_KEY);
+      })
       .finally(() => setBusy(false));
   }, []);
 
@@ -397,11 +432,8 @@ export function TripWorkspace() {
           thread_id: THREAD_ID,
           request_summary: subjects.trim(),
           requirements: {
-            origin: "东京",
-            destination: "东京",
             start_date: startDate,
             end_date: endDate,
-            walking_preference: "medium",
             subject_intents: queries.map((query, index) => ({
               query, priority: Math.max(1, 5 - index), is_primary: index === 0,
             })),
@@ -565,6 +597,47 @@ export function TripWorkspace() {
     await previewSubjectPatch("add", newSubject);
   }
 
+  async function previewRequirementPatch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!workspace) return;
+    const form = new FormData(event.currentTarget);
+    const fields = [
+      ["origin", workspace.requirements.origin],
+      ["destination", workspace.requirements.destination],
+      ["base_preference", workspace.requirements.base_preference],
+      ["start_date", workspace.requirements.start_date],
+      ["end_date", workspace.requirements.end_date],
+      ["walking_preference", workspace.requirements.walking_preference],
+    ] as const;
+    const operations = fields.flatMap(([field, current]) => {
+      const formValue = form.get(field);
+      const raw = typeof formValue === "string" ? formValue.trim() : "";
+      const value = raw || null;
+      return value === (current ?? null) ? [] : [{ op: "update_requirement", field, value }];
+    });
+    if (operations.length === 0) { setEditingRequirements(false); return; }
+    const patch: PlanPatch = {
+      patch_id: crypto.randomUUID(),
+      trip_id: workspace.trip_id,
+      expected_base_version: workspace.state_version,
+      rationale: "更新可编辑的行程条件",
+      requires_confirmation: true,
+      status: "proposed",
+      idempotency_key: `web-requirements:${crypto.randomUUID()}`,
+      created_at: new Date().toISOString(),
+      operations,
+    };
+    setBusy(true); setError(null);
+    try {
+      const body = await api<PatchPreview>(`/api/workspaces/${workspace.trip_id}/patches/preview`, {
+        method: "POST",
+        body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, patch }),
+      });
+      setWorkspace(body.workspace); setPreview(body.preview); setEditingRequirements(false);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法预览条件修改"); }
+    finally { setBusy(false); }
+  }
+
   async function applyPatch() {
     if (!workspace || !preview) return;
     setBusy(true); setError(null);
@@ -583,11 +656,116 @@ export function TripWorkspace() {
     finally { setBusy(false); }
   }
 
+  async function clearSchedule() {
+    if (!workspace) return;
+    setBusy(true); setError(null);
+    try {
+      const body = await api<WorkspaceView>(`/api/workspaces/${workspace.trip_id}/schedule/clear`, {
+        method: "POST",
+        body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, expected_state_version: workspace.state_version }),
+      });
+      setWorkspace(body); setFilter("all"); setPreview(null);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法清空行程"); }
+    finally { setBusy(false); }
+  }
+
+  async function clearDay(dayNumber: number) {
+    if (!workspace) return;
+    setBusy(true); setError(null);
+    try {
+      const body = await api<WorkspaceView>(`/api/workspaces/${workspace.trip_id}/days/${dayNumber}/clear`, {
+        method: "POST",
+        body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, expected_state_version: workspace.state_version }),
+      });
+      setWorkspace(body); setPreview(null);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法清空当天安排"); }
+    finally { setBusy(false); }
+  }
+
+  async function restoreItinerary(itineraryId: string) {
+    if (!workspace) return;
+    setBusy(true); setError(null);
+    try {
+      const body = await api<WorkspaceView>(`/api/workspaces/${workspace.trip_id}/itineraries/${itineraryId}/restore`, {
+        method: "POST",
+        body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, expected_state_version: workspace.state_version }),
+      });
+      setWorkspace(body);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法恢复这个版本"); }
+    finally { setBusy(false); }
+  }
+
+  async function deleteItinerary(itineraryId: string) {
+    if (!workspace) return;
+    setBusy(true); setError(null);
+    try {
+      const body = await api<WorkspaceView>(`/api/workspaces/${workspace.trip_id}/itineraries/${itineraryId}`, {
+        method: "DELETE",
+        body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, expected_state_version: workspace.state_version }),
+      });
+      setWorkspace(body);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法删除这个版本"); }
+    finally { setBusy(false); }
+  }
+
+  async function acceptKnowledgeRule(ruleId: string) {
+    if (!workspace) return;
+    setBusy(true); setError(null);
+    try {
+      const body = await api<WorkspaceView>(`/api/workspaces/${workspace.trip_id}/knowledge/rules/${ruleId}/accept`, {
+        method: "POST",
+        body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, expected_base_version: workspace.state_version, idempotency_key: `web-rule:${crypto.randomUUID()}`, confirm: true }),
+      });
+      setWorkspace(body);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法启用这条资料规则"); }
+    finally { setBusy(false); }
+  }
+
+  async function changeKnowledgeRule(ruleId: string, action: "deactivate" | "delete") {
+    if (!workspace) return;
+    setBusy(true); setError(null);
+    try {
+      const suffix = action === "deactivate" ? `/${ruleId}/deactivate` : `/${ruleId}`;
+      const body = await api<WorkspaceView>(`/api/workspaces/${workspace.trip_id}/knowledge/rules${suffix}`, {
+        method: action === "deactivate" ? "POST" : "DELETE",
+        body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, expected_state_version: workspace.state_version }),
+      });
+      setWorkspace(body);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法更新这条资料规则"); }
+    finally { setBusy(false); }
+  }
+
+  async function archiveAndClose() {
+    if (!workspace) return;
+    setBusy(true); setError(null);
+    try {
+      await api<WorkspaceView>(`/api/workspaces/${workspace.trip_id}/archive`, {
+        method: "POST",
+        body: JSON.stringify({ owner_user_id: OWNER_ID, thread_id: THREAD_ID, expected_state_version: workspace.state_version }),
+      });
+      reset();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法归档工作区"); }
+    finally { setBusy(false); }
+  }
+
+  async function permanentlyDelete() {
+    if (!workspace) return;
+    if (!deleteArmed) { setDeleteArmed(true); return; }
+    setBusy(true); setError(null);
+    try {
+      await api<{ trip_id: string; deleted: true }>(`/api/workspaces/${workspace.trip_id}?owner_user_id=${OWNER_ID}&thread_id=${THREAD_ID}`, { method: "DELETE" });
+      reset();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法永久删除工作区"); }
+    finally { setBusy(false); }
+  }
+
   function reset() {
     window.sessionStorage.removeItem(STORAGE_KEY);
+    window.sessionStorage.removeItem(LEGACY_STORAGE_KEY);
     setWorkspace(null); setMessages([]); setPreview(null); setError(null); setSelectedPlaceId(null);
     setSelectedPlaceIds(new Set()); setMultiSelect(false); setEvidence(null);
     setFilter("all"); setSubjectFilter("all"); setAreaFilter("all"); setConfidenceFilter("all");
+    setDeleteArmed(false);
   }
 
   function selectMapPlace(placeId: string) {
@@ -629,6 +807,10 @@ export function TripWorkspace() {
       item.subject.name_cn || item.subject.name,
     ]),
   ), [workspace]);
+  const userWarnings = useMemo(
+    () => [...new Set((workspace?.warnings ?? []).map(userFacingWarning))],
+    [workspace],
+  );
 
   useEffect(() => {
     if (!workspace || !selectedPlaceId || evidence !== null || evidenceLoading) return;
@@ -681,7 +863,11 @@ export function TripWorkspace() {
                 <textarea id="mix-patch-message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder={currentItinerary ? "例如：第二天少走一点，把车站附近的地点放在一起" : "可以继续补充住宿、交通或步行偏好"} rows={4} disabled={busy} />
                 <button type="submit" disabled={!message.trim() || busy}><Send aria-hidden="true" />发送</button>
               </form>
-              <button className="mix-text-button" type="button" onClick={reset}><X aria-hidden="true" />关闭当前工作区</button>
+              {currentItinerary && <button className="mix-text-button" type="button" disabled={busy} onClick={() => void clearSchedule()}><Trash2 aria-hidden="true" />清空已安排行程</button>}
+              <button className="mix-text-button" type="button" disabled={busy} onClick={() => void archiveAndClose()}><X aria-hidden="true" />归档并关闭</button>
+              <button className="mix-text-button" type="button" disabled={busy} onClick={() => void permanentlyDelete()}><Trash2 aria-hidden="true" />{deleteArmed ? "再次点击确认永久删除" : "永久删除工作区"}</button>
+              {deleteArmed && <p className="mix-warning" role="alert">永久删除会清除当前工作区的对话、行程版本和资料关联，且无法撤销。</p>}
+              <button className="mix-text-button" type="button" onClick={reset}><X aria-hidden="true" />仅关闭当前页面</button>
             </>
           )}
         </aside>
@@ -742,7 +928,7 @@ export function TripWorkspace() {
                   <div className="mix-day-grid">
                     {currentItinerary.days.map((day, index) => (
                       <article key={day.date}>
-                        <header><span>DAY {index + 1}</span><strong>{day.date}</strong><small><Footprints aria-hidden="true" />{Math.round(day.walking_distance_meters / 100) / 10} km</small></header>
+                        <header><span>DAY {index + 1}</span><strong>{day.date}</strong><small><Footprints aria-hidden="true" />{Math.round(day.walking_distance_meters / 100) / 10} km</small><button type="button" disabled={busy} onClick={() => void clearDay(index + 1)}>清空当天</button></header>
                         <ol>{day.visits.map((visit) => <li key={visit.place_id}><time>{formatTime(visit.start_at)}</time><button onClick={() => setSelectedPlaceId(visit.place_id)}>{placeById.get(visit.place_id)?.canonical_name ?? visit.place_id}</button></li>)}</ol>
                       </article>
                     ))}
@@ -759,11 +945,13 @@ export function TripWorkspace() {
           <div className="mix-pane-title"><GitCompareArrows aria-hidden="true" /><div><strong>行程信息</strong><span>日期、版本与资料说明</span></div></div>
           {!workspace ? <p className="mix-muted">开始规划后，这里会显示日期、住宿、行程版本和资料说明。</p> : (
             <>
-              <section className="mix-context-block"><h3><CalendarDays aria-hidden="true" />行程范围</h3><dl><div><dt>日期</dt><dd>{workspace.requirements.start_date ?? "未定"} — {workspace.requirements.end_date ?? "未定"}</dd></div><div><dt>作品</dt><dd>{workspace.confirmed_subjects.length} 个条目已确认</dd></div><div><dt>住宿基点</dt><dd>{workspace.base_candidates.find((base) => base.base_id === workspace.selected_base_id)?.name ?? "待选择"}</dd></div></dl></section>
+              <section className="mix-context-block mix-requirements"><h3><CalendarDays aria-hidden="true" />行程条件</h3><dl><div><dt>出发地</dt><dd>{workspace.requirements.origin ?? "待补充"}</dd></div><div><dt>目的地</dt><dd>{workspace.requirements.destination ?? "待补充"}</dd></div><div><dt>日期</dt><dd>{workspace.requirements.start_date ?? "未定"} — {workspace.requirements.end_date ?? "未定"}</dd></div><div><dt>住宿偏好</dt><dd>{workspace.requirements.base_preference ?? workspace.base_candidates.find((base) => base.base_id === workspace.selected_base_id)?.name ?? "待选择"}</dd></div><div><dt>步行</dt><dd>{workspace.requirements.walking_preference === "low" ? "尽量少走" : workspace.requirements.walking_preference === "high" ? "可以多走" : workspace.requirements.walking_preference === "medium" ? "适中" : "待补充"}</dd></div></dl><button type="button" onClick={() => setEditingRequirements((value) => !value)}>{editingRequirements ? "收起编辑" : "编辑行程条件"}</button>{editingRequirements && <form className="mix-requirement-form" onSubmit={(event) => void previewRequirementPatch(event)}><label>出发地<input name="origin" defaultValue={workspace.requirements.origin ?? ""} /></label><label>目的地<input name="destination" defaultValue={workspace.requirements.destination ?? ""} /></label><label>住宿区域<input name="base_preference" defaultValue={workspace.requirements.base_preference ?? ""} /></label><label>开始日期<input name="start_date" type="date" defaultValue={workspace.requirements.start_date ?? ""} /></label><label>结束日期<input name="end_date" type="date" defaultValue={workspace.requirements.end_date ?? ""} /></label><label>步行偏好<select name="walking_preference" defaultValue={workspace.requirements.walking_preference ?? ""}><option value="">待补充</option><option value="low">尽量少走</option><option value="medium">适中</option><option value="high">可以多走</option></select></label><button className="mix-primary-button is-compact" type="submit" disabled={busy}>预览条件修改</button></form>}</section>
               <section className="mix-context-block mix-work-manager"><h3><MapPinned aria-hidden="true" />作品管理</h3><ul>{workspace.requirements.subject_intents.map((intent) => <li key={intent.intent_id}><span><strong>{intent.query}</strong><small>{intent.confirmed_subject_ids.length ? `${intent.confirmed_subject_ids.length} 个条目` : "等待确认"}</small></span>{workspace.requirements.subject_intents.length > 1 && <button type="button" aria-label={`移除作品 ${intent.query}`} disabled={busy} onClick={() => void previewSubjectPatch("remove", intent.intent_id, intent.query)}><Trash2 aria-hidden="true" /></button>}</li>)}</ul><div className="mix-work-manager-actions"><button type="button" disabled={busy} onClick={() => { setEditingSubjects(true); setActiveStage("map"); }}>编辑已选版本</button><form onSubmit={(event) => void addSubject(event)}><label htmlFor="mix-add-subject">添加作品</label><div><input id="mix-add-subject" value={newSubject} onChange={(event) => setNewSubject(event.target.value)} placeholder="输入作品名称" maxLength={100} disabled={busy || workspace.requirements.subject_intents.length >= 12} /><button type="submit" disabled={busy || !newSubject.trim() || workspace.requirements.subject_intents.length >= 12}><Plus aria-hidden="true" />添加</button></div></form></div>{workspace.requirements.subject_intents.length >= 12 && <p className="mix-muted">一个工作区最多管理 12 部作品；可以先移除不需要的作品再添加。</p>}</section>
+              {userWarnings.length > 0 && <section className="mix-context-block" aria-labelledby="mix-warning-title"><h3 id="mix-warning-title"><AlertTriangle aria-hidden="true" />需要留意</h3><ul className="mix-event-list">{userWarnings.map((warning) => <li key={warning}><span>{warning}</span></li>)}</ul></section>}
               <section className="mix-context-block"><h3><Clock3 aria-hidden="true" />修改记录</h3><ul className="mix-event-list">{workspace.diffs.slice().reverse().map((diff) => <li key={`${diff.from_version}-${diff.to_version}`}><span>行程版本 {diff.to_version}</span><small>{diff.changed_day_numbers.length ? `调整第 ${diff.changed_day_numbers.join("、")} 天` : "更新了行程要求"}</small></li>)}</ul>{workspace.diffs.length === 0 && <p className="mix-muted">还没有修改记录。</p>}</section>
-              <section className="mix-context-block"><h3><GitCompareArrows aria-hidden="true" />行程版本</h3><ul className="mix-version-list">{workspace.itineraries.slice(0, 6).map((item) => <li key={item.itinerary_id}><strong>v{item.version}</strong><span>{strategyLabel(item.strategy)}</span><small>{item.days.reduce((total, day) => total + day.visits.length, 0)} 个地点{item.validation_issues.length ? ` · ${item.validation_issues.length} 项需调整` : " · 安排可行"}</small></li>)}</ul></section>
-              <section className="mix-context-block"><button className="mix-disclosure" onClick={() => setShowEvidence((value) => !value)} aria-expanded={showEvidence}><Layers3 aria-hidden="true" />资料说明 <span>{workspace.counts.raw_scene_records}</span></button>{showEvidence && <div className="mix-evidence-summary"><p>已整理 {workspace.counts.raw_scene_records} 条场景资料，形成 {workspace.counts.canonical_places} 个巡礼地点。</p>{workspace.counts.quarantined_records > 0 && <p>{workspace.counts.quarantined_records} 条资料因位置不明确而未加入地图。</p>}<p>出发前请再次确认开放时间和现场规则。</p></div>}</section>
+              <section className="mix-context-block"><h3><GitCompareArrows aria-hidden="true" />行程版本</h3><ul className="mix-version-list">{workspace.itineraries.slice(0, 6).map((item, index) => <li key={item.itinerary_id}><strong>v{item.version}</strong><span>{strategyLabel(item.strategy)}</span><small>{item.days.reduce((total, day) => total + day.visits.length, 0)} 个地点{item.validation_issues.length ? ` · ${item.validation_issues.length} 项需调整` : " · 安排可行"}</small>{index >= (workspace.planning_strategies?.length ?? 2) && <span className="mix-version-actions"><button type="button" disabled={busy} onClick={() => void restoreItinerary(item.itinerary_id)}>恢复</button><button type="button" disabled={busy} onClick={() => void deleteItinerary(item.itinerary_id)}>删除</button></span>}</li>)}</ul></section>
+              {(workspace.knowledge_evidence?.length ?? 0) > 0 && <section className="mix-context-block"><h3><Layers3 aria-hidden="true" />访问资料与规则</h3><ul className="mix-knowledge-list">{workspace.knowledge_evidence?.slice(0, 6).map((item) => <li key={item.evidence_id}><strong>{item.title}</strong><small>{item.excerpt}</small><span>{item.source_type === "official_notice" || item.source_type === "official_guide" ? "官方资料" : "参考资料"} · {item.accessed_at}</span>{item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">查看来源<ExternalLink aria-hidden="true" /></a>}</li>)}</ul>{workspace.knowledge_rules.length > 0 && <ul className="mix-rule-list">{workspace.knowledge_rules.map((rule) => <li key={rule.rule_id}><span>{rule.rule_type === "photography_restriction" ? "拍摄限制" : rule.rule_type === "closure_date_range" ? "关闭日期" : rule.rule_type}</span><small>{rule.status === "active_constraint" ? "已启用并进入行程校验" : rule.status === "proposed" ? "等待你确认" : "仅作参考，不会自动约束行程"}</small><span className="mix-version-actions">{rule.status === "proposed" && <button type="button" disabled={busy} onClick={() => void acceptKnowledgeRule(rule.rule_id)}>确认启用</button>}{rule.status === "active_constraint" && <button type="button" disabled={busy} onClick={() => void changeKnowledgeRule(rule.rule_id, "deactivate")}>停用</button>}<button type="button" disabled={busy} onClick={() => void changeKnowledgeRule(rule.rule_id, "delete")}>删除</button></span></li>)}</ul>}</section>}
+              <section className="mix-context-block"><button className="mix-disclosure" onClick={() => setShowEvidence((value) => !value)} aria-expanded={showEvidence}><Layers3 aria-hidden="true" />资料说明 <span>{workspace.counts.raw_scene_records}</span></button>{showEvidence && <div className="mix-evidence-summary"><p>已整理 {workspace.counts.raw_scene_records} 条场景资料，形成 {workspace.counts.canonical_places} 个巡礼地点。</p><ul>{workspace.confirmed_subjects.map((item) => item.point_collection && <li key={item.subject.subject_id}><strong>{item.subject.name_cn || item.subject.name}</strong><span>{item.point_collection.loaded_count} / {item.point_collection.expected_count} 个点位 · {item.point_collection.is_complete ? "完整" : "部分"} · {pointSourceLabel(item.point_collection.provider)}{item.point_collection.data_version ? ` · 版本 ${item.point_collection.data_version}` : ""}</span></li>)}</ul>{workspace.counts.quarantined_records > 0 && <p>{workspace.counts.quarantined_records} 条资料因位置不明确而未加入地图。</p>}<p>出发前请再次确认开放时间和现场规则。</p></div>}</section>
             </>
           )}
         </aside>

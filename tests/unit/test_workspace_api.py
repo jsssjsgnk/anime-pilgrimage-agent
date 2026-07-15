@@ -7,11 +7,21 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 
 from pilgrimage_agent.agent.mcp_client import FixtureAgentToolClient
-from pilgrimage_agent.agent.workspace import WorkspaceAgent, WorkspaceStartRequest
+from pilgrimage_agent.agent.review import FixtureReviewer
+from pilgrimage_agent.agent.workspace import (
+    ConfirmWorkspaceSubjectsRequest,
+    PlanWorkspaceRequest,
+    SubjectConfirmation,
+    WorkspaceAgent,
+    WorkspaceStartRequest,
+)
+from pilgrimage_agent.agent.workspace_graph import WorkspaceGraph, build_workspace_graph
 from pilgrimage_agent.api import main as api_main
 from pilgrimage_agent.domain.models import SubjectIntent, TripRequest
+from pilgrimage_agent.memory.schemas import StoredTrip
 from pilgrimage_agent.memory.store import InMemoryProjectStore, ProjectStore
 from pilgrimage_agent.rag.schemas import KnowledgeSearchResult, RetrievedEvidence
 
@@ -22,13 +32,24 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
 ) -> None:
     store = InMemoryProjectStore()
     agent = WorkspaceAgent(FixtureAgentToolClient())
+    graph = build_workspace_graph(
+        agent,
+        InMemorySaver(),
+        reviewer=FixtureReviewer(),
+        reviewer_source="fixture",
+    )
 
     @asynccontextmanager
-    async def fake_workspace_runtime(
-    ) -> AsyncIterator[tuple[WorkspaceAgent, ProjectStore]]:
+    async def fake_workspace_runtime() -> AsyncIterator[tuple[WorkspaceAgent, ProjectStore]]:
         yield agent, store
 
     monkeypatch.setattr(api_main, "_workspace_runtime", fake_workspace_runtime)
+
+    @asynccontextmanager
+    async def fake_workspace_graph_runtime() -> AsyncIterator[tuple[WorkspaceGraph, ProjectStore]]:
+        yield graph, store
+
+    monkeypatch.setattr(api_main, "_workspace_graph_runtime", fake_workspace_graph_runtime)
     knowledge_document_id = uuid4()
     knowledge_evidence = RetrievedEvidence(
         evidence_id="K-a1b2c3d4e5f6",
@@ -53,9 +74,7 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
     async def fake_knowledge_repository() -> AsyncIterator[FakeKnowledgeRepository]:
         yield FakeKnowledgeRepository()
 
-    monkeypatch.setattr(
-        api_main, "_knowledge_repository", fake_knowledge_repository
-    )
+    monkeypatch.setattr(api_main, "_knowledge_repository", fake_knowledge_repository)
     start_date = date.today() + timedelta(days=40)
     start_request = WorkspaceStartRequest(
         owner_user_id="user-a",
@@ -67,18 +86,14 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
             start_date=start_date,
             end_date=start_date + timedelta(days=1),
             anime_query="孤独摇滚",
-            subject_intents=(
-                SubjectIntent(query="孤独摇滚", priority=5, is_primary=True),
-            ),
+            subject_intents=(SubjectIntent(query="孤独摇滚", priority=5, is_primary=True),),
         ),
     )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=api_main.app), base_url="http://test"
     ) as client:
-        started = await client.post(
-            "/api/workspaces", json=start_request.model_dump(mode="json")
-        )
+        started = await client.post("/api/workspaces", json=start_request.model_dump(mode="json"))
         started_body = started.json()
         trip_id = started_body["trip_id"]
         group = started_body["subject_groups"][0]
@@ -98,6 +113,9 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
             },
         )
         confirmed_body = confirmed.json()
+        point_collection = confirmed_body["confirmed_subjects"][0]["point_collection"]
+        assert point_collection["loaded_count"] == point_collection["expected_count"]
+        assert point_collection["provider"]
         recovered = await client.get(
             f"/api/workspaces/{trip_id}",
             params={"owner_user_id": "user-a", "thread_id": "thread-a"},
@@ -174,9 +192,7 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
                 "question": "这个地点在行程日期是否关闭?",
                 "proposal": {
                     "rule_type": "closure_date_range",
-                    "target_refs": [
-                        {"entity_type": "place", "entity_id": blocked_place_id}
-                    ],
+                    "target_refs": [{"entity_type": "place", "entity_id": blocked_place_id}],
                     "value": {
                         "closed_from": start_date.isoformat(),
                         "closed_until": (start_date + timedelta(days=1)).isoformat(),
@@ -186,14 +202,30 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
             },
         )
         rule_accepted = await client.post(
-            f"/api/workspaces/{trip_id}/knowledge/rules/"
-            f"{rule_proposed.json()['rule_id']}/accept",
+            f"/api/workspaces/{trip_id}/knowledge/rules/{rule_proposed.json()['rule_id']}/accept",
             json={
                 "owner_user_id": "user-a",
                 "thread_id": "thread-a",
                 "expected_base_version": after_patch_body["state_version"],
                 "idempotency_key": "api:accept-closure-rule",
                 "confirm": True,
+            },
+        )
+        rule_deactivated = await client.post(
+            f"/api/workspaces/{trip_id}/knowledge/rules/{rule_proposed.json()['rule_id']}/deactivate",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "expected_state_version": rule_accepted.json()["state_version"],
+            },
+        )
+        rule_deleted = await client.request(
+            "DELETE",
+            f"/api/workspaces/{trip_id}/knowledge/rules/{rule_proposed.json()['rule_id']}",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "expected_state_version": rule_deactivated.json()["state_version"],
             },
         )
         conversational_patch = await client.post(
@@ -210,6 +242,49 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
                 "owner_user_id": "user-a",
                 "thread_id": "thread-a",
                 "message": "添加《莉可丽丝》",
+            },
+        )
+        add_preview = conversational_add.json()["preview"]
+        added = await client.post(
+            f"/api/workspaces/{trip_id}/patches/{add_preview['patch']['patch_id']}/apply",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "confirm": True,
+            },
+        )
+        added_body = added.json()
+        new_group = next(
+            item
+            for item in added_body["subject_groups"]
+            if item["intent"]["query"] == "莉可丽丝"
+        )
+        rebased_snapshot = await graph.aget_state(
+            api_main._workspace_graph_config("user-a", "thread-a", start_request.trip_id)
+        )
+        rebased_workspace = rebased_snapshot.values["workspace"]
+        assert rebased_workspace["state_version"] == added_body["state_version"]
+        assert {
+            item["intent_id"]
+            for item in rebased_workspace["requirements"]["subject_intents"]
+        } == {
+            group["intent"]["intent_id"],
+            new_group["intent"]["intent_id"],
+        }
+        assert rebased_snapshot.next == ("confirm_subjects",)
+        confirmed_added = await client.post(
+            f"/api/workspaces/{trip_id}/subjects/confirm",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "expected_state_version": added_body["state_version"],
+                "confirmations": [
+                    {
+                        "intent_id": new_group["intent"]["intent_id"],
+                        "decision": "accept",
+                        "selected_subject_id": new_group["candidates"][0]["subject_id"],
+                    }
+                ],
             },
         )
 
@@ -239,20 +314,21 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
     assert patch_preview.json()["preview"]["impact"]["validation_required"] is True
     assert patch_applied.status_code == 200
     assert patch_applied.json()["requirements"]["walking_preference"] == "low"
-    assert patch_applied.json()["diffs"][-1]["changed_requirements"] == [
-        "walking_preference"
-    ]
+    assert patch_applied.json()["diffs"][-1]["changed_requirements"] == ["walking_preference"]
     assert after_patch.json()["state_version"] == planned_body["state_version"] + 1
     assert rule_proposed.status_code == 200
     assert rule_proposed.json()["status"] == "proposed"
     assert rule_accepted.status_code == 200
     assert rule_accepted.json()["knowledge_rules"][-1]["status"] == "active_constraint"
     assert any(
-        omission["place_id"] == blocked_place_id
-        and omission["reason_code"] == "visit_window"
+        omission["place_id"] == blocked_place_id and omission["reason_code"] == "visit_window"
         for itinerary in rule_accepted.json()["itineraries"]
         for omission in itinerary["omissions"]
     )
+    assert rule_deactivated.status_code == 200
+    assert rule_deactivated.json()["knowledge_rules"][-1]["status"] == "proposed"
+    assert rule_deleted.status_code == 200
+    assert rule_deleted.json()["knowledge_rules"] == []
     assert conversational_patch.status_code == 200
     assert conversational_patch.json()["preview"]["patch"]["operations"] == [
         {
@@ -262,12 +338,22 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
         }
     ]
     assert conversational_add.status_code == 200
-    assert conversational_add.json()["preview"]["patch"]["operations"][0][
-        "action"
-    ] == "add"
-    assert conversational_add.json()["preview"]["patch"]["operations"][0][
-        "intent"
-    ]["query"] == "莉可丽丝"
+    assert conversational_add.json()["preview"]["patch"]["operations"][0]["action"] == "add"
+    assert (
+        conversational_add.json()["preview"]["patch"]["operations"][0]["intent"]["query"]
+        == "莉可丽丝"
+    )
+    assert added.status_code == 200
+    assert added_body["status"] == "awaiting_subject_confirmation"
+    assert confirmed_added.status_code == 200
+    assert confirmed_added.json()["state_version"] > added_body["state_version"]
+    assert confirmed_added.json()["status"] != "awaiting_subject_confirmation"
+    assert {
+        item["intent_id"] for item in confirmed_added.json()["confirmed_subjects"]
+    } == {
+        group["intent"]["intent_id"],
+        new_group["intent"]["intent_id"],
+    }
     assert conversational_patch.json()["workspace"]["pending_patch_id"] is not None
     assistant_copy = conversational_patch.json()["assistant_message"]["content"]
     assert "PlanPatch" not in assistant_copy
@@ -284,10 +370,145 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
         "workspace_patch_applied",
         "workspace_knowledge_rule_proposed",
         "workspace_knowledge_rule_accepted",
+        "workspace_knowledge_rule_deactivated",
+        "workspace_knowledge_rule_deleted",
         "conversation_message",
         "workspace_patch_proposed",
         "conversation_message",
         "conversation_message",
         "workspace_patch_proposed",
         "conversation_message",
+        "workspace_patch_applied",
+        "workspace_subjects_confirmed",
     ]
+
+
+@pytest.mark.asyncio
+async def test_workspace_clear_restore_archive_and_permanent_delete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = InMemoryProjectStore()
+    agent = WorkspaceAgent(FixtureAgentToolClient())
+    graph = build_workspace_graph(agent, InMemorySaver())
+
+    @asynccontextmanager
+    async def fake_workspace_runtime() -> AsyncIterator[tuple[WorkspaceAgent, ProjectStore]]:
+        yield agent, store
+
+    @asynccontextmanager
+    async def fake_workspace_graph_runtime() -> AsyncIterator[tuple[WorkspaceGraph, ProjectStore]]:
+        yield graph, store
+
+    monkeypatch.setattr(api_main, "_workspace_runtime", fake_workspace_runtime)
+    monkeypatch.setattr(api_main, "_workspace_graph_runtime", fake_workspace_graph_runtime)
+    start_date = date.today() + timedelta(days=50)
+    initial = await agent.start(
+        WorkspaceStartRequest(
+            owner_user_id="delete-user",
+            thread_id="delete-thread",
+            request_summary="两天巡礼《孤独摇滚》。",
+            requirements=TripRequest(
+                origin="京都",
+                destination="东京",
+                start_date=start_date,
+                end_date=start_date + timedelta(days=1),
+                subject_intents=(SubjectIntent(query="孤独摇滚", priority=5, is_primary=True),),
+            ),
+        )
+    )
+    group = initial.subject_groups[0]
+    curated = await agent.confirm_subjects(
+        initial,
+        ConfirmWorkspaceSubjectsRequest(
+            owner_user_id=initial.owner_user_id,
+            thread_id=initial.thread_id,
+            expected_state_version=initial.state_version,
+            confirmations=(
+                SubjectConfirmation(
+                    intent_id=group.intent.intent_id,
+                    decision="accept",
+                    selected_subject_id=group.candidates[0].subject_id,
+                ),
+            ),
+        ),
+    )
+    planned = agent.plan(
+        curated,
+        PlanWorkspaceRequest(
+            owner_user_id=curated.owner_user_id,
+            thread_id=curated.thread_id,
+            expected_state_version=curated.state_version,
+            base_id=curated.base_candidates[0].base_id,
+        ),
+    )
+    await store.save_trip(
+        StoredTrip(
+            trip_id=planned.trip_id,
+            owner_user_id=planned.owner_user_id,
+            thread_id=planned.thread_id,
+            state=planned.model_dump(mode="json"),
+        )
+    )
+    source_id = planned.itineraries[0].itinerary_id
+    mutation = {
+        "owner_user_id": planned.owner_user_id,
+        "thread_id": planned.thread_id,
+        "expected_state_version": planned.state_version,
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=api_main.app), base_url="http://test"
+    ) as client:
+        cleared = await client.post(
+            f"/api/workspaces/{planned.trip_id}/schedule/clear", json=mutation
+        )
+        cleared_body = cleared.json()
+        restored = await client.post(
+            f"/api/workspaces/{planned.trip_id}/itineraries/{source_id}/restore",
+            json={**mutation, "expected_state_version": cleared_body["state_version"]},
+        )
+        restored_body = restored.json()
+        deleted_version = await client.request(
+            "DELETE",
+            f"/api/workspaces/{planned.trip_id}/itineraries/{source_id}",
+            json={**mutation, "expected_state_version": restored_body["state_version"]},
+        )
+        deleted_version_body = deleted_version.json()
+        archived = await client.post(
+            f"/api/workspaces/{planned.trip_id}/archive",
+            json={
+                **mutation,
+                "expected_state_version": deleted_version_body["state_version"],
+            },
+        )
+        wrong_namespace = await client.delete(
+            f"/api/workspaces/{planned.trip_id}",
+            params={"owner_user_id": "other", "thread_id": planned.thread_id},
+        )
+        permanent = await client.delete(
+            f"/api/workspaces/{planned.trip_id}",
+            params={
+                "owner_user_id": planned.owner_user_id,
+                "thread_id": planned.thread_id,
+            },
+        )
+        missing = await client.get(
+            f"/api/workspaces/{planned.trip_id}",
+            params={
+                "owner_user_id": planned.owner_user_id,
+                "thread_id": planned.thread_id,
+            },
+        )
+
+    assert cleared.status_code == 200
+    assert cleared_body["status"] == "ready_to_plan"
+    assert cleared_body["itineraries"] == []
+    assert restored.status_code == 200
+    assert restored_body["itineraries"][0]["itinerary_id"] != str(source_id)
+    assert deleted_version.status_code == 200
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "archived"
+    assert wrong_namespace.status_code == 404
+    assert permanent.status_code == 200
+    assert permanent.json() == {"trip_id": str(planned.trip_id), "deleted": True}
+    assert missing.status_code == 404
+    assert planned.trip_id not in store.events

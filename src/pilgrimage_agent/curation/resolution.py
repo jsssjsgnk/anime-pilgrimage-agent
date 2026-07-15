@@ -10,6 +10,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from hashlib import sha256
+from itertools import product
+from math import cos, floor, radians, sin
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pilgrimage_agent.domain.models import (
@@ -29,7 +31,7 @@ from pilgrimage_agent.domain.workspace import (
 )
 from pilgrimage_agent.planning.geo import haversine_meters
 
-POLICY_VERSION = "place-resolution-v1"
+POLICY_VERSION = "place-resolution-v2"
 _SPACE = re.compile(r"[^\w\u3040-\u30ff\u3400-\u9fff]+", re.UNICODE)
 _EXIT = re.compile(
     r"(?:exit\s*[a-z0-9]+|[東西南北中央]?(?:口|出口)|\d+番?(?:口|出口))",
@@ -76,6 +78,7 @@ def evidence_from_point(
         provider_record_id=str(point.id),
         coordinate=GeoCoordinate(latitude=point.latitude, longitude=point.longitude),
         names=(point.name,),
+        description=point.description,
         episode_refs=point.episode_refs,
         image_url=point.image_url,
         source_url=point.provenance.source_url,
@@ -99,6 +102,16 @@ def _name_similarity(first: SceneEvidence, second: SceneEvidence) -> float:
         for left in first_names
         for right in second_names
     )
+
+
+def _distinctive_name_containment(first: SceneEvidence, second: SceneEvidence) -> bool:
+    generic = {"station", "park", "street", "bridge", "exit", "駅", "公園", "橋"}
+    for left in (_normalized_name(name).replace(" ", "") for name in first.names):
+        for right in (_normalized_name(name).replace(" ", "") for name in second.names):
+            shorter, longer = sorted((left, right), key=len)
+            if len(shorter) >= 4 and shorter not in generic and shorter in longer:
+                return True
+    return False
 
 
 def _exit_tokens(evidence: SceneEvidence) -> frozenset[str]:
@@ -148,20 +161,49 @@ def _pair_decision(
         return _PairDecision("split", distance, similarity)
     if distance > radius_meters:
         return _PairDecision("separate", distance, similarity)
-    same_source_label = bool(
-        first.source_label
-        and second.source_label
-        and _normalized_name(first.source_label) == _normalized_name(second.source_label)
-    )
-    if same_source_label and distance <= radius_meters:
+    if (
+        first.provider == second.provider
+        and first.provider_record_id == second.provider_record_id
+    ):
+        return _PairDecision("merge", distance, 1.0)
+    if distance <= 25 and _distinctive_name_containment(first, second):
         return _PairDecision("merge", distance, max(similarity, 0.9))
-    if distance <= 25 and similarity >= 0.55:
+    if distance <= 12 and similarity >= 0.85:
         return _PairDecision("merge", distance, similarity)
-    if similarity >= 0.86:
+    if similarity >= 0.92:
         return _PairDecision("merge", distance, similarity)
-    if similarity >= 0.35:
+    if similarity >= 0.35 or distance <= 25:
         return _PairDecision("ambiguous", distance, similarity)
     return _PairDecision("separate", distance, similarity)
+
+
+def _spatial_candidate_pairs(
+    evidence: tuple[SceneEvidence, ...], radius_meters: float
+) -> set[frozenset[UUID]]:
+    """Generate bounded nearby candidates using a three-dimensional earth grid."""
+
+    earth_radius = 6_371_008.8
+    buckets: dict[tuple[int, int, int], list[SceneEvidence]] = defaultdict(list)
+    pairs: set[frozenset[UUID]] = set()
+    for item in evidence:
+        assert item.coordinate is not None
+        latitude = radians(item.coordinate.latitude)
+        longitude = radians(item.coordinate.longitude)
+        key = (
+            floor(earth_radius * cos(latitude) * cos(longitude) / radius_meters),
+            floor(earth_radius * cos(latitude) * sin(longitude) / radius_meters),
+            floor(earth_radius * sin(latitude) / radius_meters),
+        )
+        for offset in product((-1, 0, 1), repeat=3):
+            neighbor_key = (
+                key[0] + offset[0],
+                key[1] + offset[1],
+                key[2] + offset[2],
+            )
+            for candidate in buckets.get(neighbor_key, ()):
+                pairs.add(frozenset((candidate.evidence_id, item.evidence_id)))
+        buckets[key].append(item)
+    return pairs
 
 
 def _medoid(evidence: tuple[SceneEvidence, ...]) -> SceneEvidence:
@@ -299,26 +341,41 @@ def resolve_places(
             valid.append(resolved)
             normalized_evidence.append(resolved)
 
+    by_evidence_id = {item.evidence_id: item for item in valid}
+    candidate_pairs = _spatial_candidate_pairs(tuple(valid), radius_meters)
+    candidate_pairs.update(
+        frozenset((left, right))
+        for override in overrides
+        for left in override.evidence_ids
+        for right in override.evidence_ids
+        if left != right and left in by_evidence_id and right in by_evidence_id
+    )
     decisions: dict[frozenset[UUID], _PairDecision] = {}
     ambiguous: list[AmbiguousPlaceMerge] = []
-    for index, first in enumerate(valid):
-        for second in valid[index + 1 :]:
-            decision = _pair_decision(
-                first, second, overrides, radius_meters=radius_meters
-            )
-            decisions[frozenset((first.evidence_id, second.evidence_id))] = decision
-            if decision.action == "ambiguous":
-                ambiguous.append(
-                    AmbiguousPlaceMerge(
-                        evidence_ids=(first.evidence_id, second.evidence_id),
-                        distance_meters=decision.distance_meters,
-                        name_similarity=decision.similarity,
-                        reason=(
-                            "Close evidence has insufficient identity agreement; "
-                            "review required."
-                        ),
-                    )
+    for pair in sorted(candidate_pairs, key=lambda item: tuple(sorted(map(str, item)))):
+        first_id, second_id = sorted(pair, key=str)
+        first = by_evidence_id[first_id]
+        second = by_evidence_id[second_id]
+        decision = _pair_decision(
+            first, second, overrides, radius_meters=radius_meters
+        )
+        decisions[pair] = decision
+        if decision.action == "ambiguous":
+            ambiguous.append(
+                AmbiguousPlaceMerge(
+                    evidence_ids=(first.evidence_id, second.evidence_id),
+                    distance_meters=decision.distance_meters,
+                    name_similarity=decision.similarity,
+                    reason=(
+                        "Close evidence has insufficient identity agreement; "
+                        "review required."
+                    ),
                 )
+            )
+
+    def merges(first_id: UUID, second_id: UUID) -> bool:
+        pair_decision = decisions.get(frozenset((first_id, second_id)))
+        return pair_decision is not None and pair_decision.action == "merge"
 
     clusters: list[list[SceneEvidence]] = []
     for item in valid:
@@ -326,8 +383,7 @@ def resolve_places(
             cluster
             for cluster in clusters
             if all(
-                decisions[frozenset((item.evidence_id, member.evidence_id))].action
-                == "merge"
+                merges(item.evidence_id, member.evidence_id)
                 for member in cluster
             )
         ]

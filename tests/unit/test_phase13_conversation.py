@@ -17,6 +17,7 @@ from pilgrimage_agent.agent.conversation import (
 from pilgrimage_agent.agent.schemas import (
     ConfirmationRequest,
     ConversationDecision,
+    ConversationEventPayload,
     ConversationIntent,
     ConversationMessage,
     WorkflowResponse,
@@ -71,8 +72,11 @@ async def test_recognized_safe_intent_does_not_wait_for_llm() -> None:
             context: ConversationContext,
             recent_messages: tuple[ConversationMessage, ...],
             message: str,
+            *,
+            memory_summary: str | None = None,
+            critical_decisions: tuple[str, ...] = (),
         ) -> ConversationDecision:
-            del context, recent_messages, message
+            del context, recent_messages, message, memory_summary, critical_decisions
             raise AssertionError("recognized modifications must not call the LLM")
 
     agent = ResilientConversationAgent(UnexpectedLlm())
@@ -150,3 +154,48 @@ async def test_conversation_api_persists_and_recovers_only_inside_namespace(
     assert len(recovered.json()) == 2
     assert recovered.json()[0]["created_at"]
     assert isolated.status_code == 404
+
+
+async def test_conversation_compaction_keeps_traceable_hard_constraints() -> None:
+    store = InMemoryProjectStore()
+    trip_id = uuid4()
+    await store.save_trip(
+        StoredTrip(
+            trip_id=trip_id,
+            owner_user_id="user-a",
+            thread_id="thread-a",
+            state={},
+        )
+    )
+    for index in range(26):
+        content = (
+            "这次每天必须少走路，不要自动补地点"
+            if index == 0
+            else f"普通对话第 {index} 条"
+        )
+        await api_main._append_conversation_message(
+            store,
+            "user-a",
+            trip_id,
+            ConversationEventPayload(
+                role="user",
+                content=content,
+                intent=ConversationIntent.GENERAL,
+            ),
+        )
+
+    events = await store.list_events("user-a", trip_id)
+    summaries = [
+        api_main._conversation_summary(event)
+        for event in events
+        if event.event_type == api_main.CONVERSATION_SUMMARY_EVENT
+    ]
+    window = await api_main._conversation_prompt_window(store, "user-a", trip_id)
+
+    assert summaries and summaries[-1] is not None
+    assert summaries[-1].summarized_message_count == 16
+    assert summaries[-1].source_first_message_id
+    assert summaries[-1].through_message_id
+    assert "这次每天必须少走路，不要自动补地点" in window.critical_decisions
+    assert len(window.recent_messages) == 8
+    assert window.summary is not None

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -16,8 +16,11 @@ from pilgrimage_agent.domain.models import (
     GeoCoordinate,
     MatrixQuery,
     PilgrimagePointQuery,
+    PlaceDetailsQuery,
+    PlaceFactsSearchQuery,
     PlaceSearchQuery,
     SubjectSearchQuery,
+    TransitRouteQuery,
     WeatherForecastQuery,
 )
 from pilgrimage_agent.providers.anitabi import AnitabiProvider
@@ -401,6 +404,163 @@ async def test_searchapi_contract_never_sends_credential_in_query_or_follows_boo
     assert flights.options[0].segments[0].departure_at.hour == 9
     assert "must-not-be-returned" not in flights.model_dump_json()
     assert calendar.candidates[0].price == 19000
+
+
+async def test_searchapi_transit_normalizes_steps_times_and_never_exposes_booking() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.url.params["engine"] == "google_maps_directions"
+        assert request.url.params["travel_mode"] == "transit"
+        assert request.url.params["route"] == "fewer_transfers"
+        assert request.url.params["prefer"] == "train,subway"
+        assert "api_key" not in request.url.params
+        return json_response(
+            request,
+            {
+                "directions": [
+                    {
+                        "time_window": {
+                            "depart_at": "9:00 AM",
+                            "depart_at_tz": "Asia/Tokyo",
+                            "arrive_at": "9:42 AM",
+                            "arrive_at_tz": "Asia/Tokyo",
+                        },
+                        "distance": {"value": 12000},
+                        "buy_ticket": "must-not-be-returned",
+                        "directions": [
+                            {
+                                "travel_mode": "Walking",
+                                "origin": "Shinjuku",
+                                "destination": "Fixture Station",
+                                "duration": {"value": 420},
+                                "distance": {"value": 520},
+                            },
+                            {
+                                "travel_mode": "Transit",
+                                "duration": {"value": 1920},
+                                "transit_details": {
+                                    "depart_from": {
+                                        "place": "Fixture Station",
+                                        "at": "9:10 AM",
+                                        "timezone": "Asia/Tokyo",
+                                    },
+                                    "arrive_at": {
+                                        "place": "Shimokitazawa",
+                                        "at": "9:42 AM",
+                                        "timezone": "Asia/Tokyo",
+                                    },
+                                    "vehicle": "train",
+                                    "line_name": "Fixture Line",
+                                    "line_number": "F1",
+                                    "stops": [
+                                        {
+                                            "place": "Shimokitazawa",
+                                            "at": "9:42 AM",
+                                            "timezone": "Asia/Tokyo",
+                                        }
+                                    ],
+                                },
+                            },
+                        ],
+                    }
+                ]
+            },
+        )
+
+    http, client = transport_client("searchapi", handler)
+    provider = SearchApiFlightProvider(api_key="fixture-credential", http=http)
+    query = TransitRouteQuery(
+        origin="Shinjuku",
+        destination="Shimokitazawa",
+        at=datetime.fromisoformat("2030-02-01T09:00:00+09:00"),
+        route="fewer_transfers",
+        prefer=("train", "subway"),
+    )
+    try:
+        first = await provider.transit(query)
+        second = await provider.transit(query)
+    finally:
+        await client.aclose()
+    assert calls == 1
+    assert first == second
+    assert first.options[0].duration_seconds == 2520
+    assert first.options[0].walking_seconds == 420
+    assert first.options[0].steps[1].line_name == "Fixture Line"
+    assert first.options[0].steps[1].stops[0].at is not None
+    assert "must-not-be-returned" not in first.model_dump_json()
+
+
+async def test_searchapi_place_search_requires_id_before_exact_details() -> None:
+    engines: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        engine = request.url.params["engine"]
+        engines.append(engine)
+        assert "api_key" not in request.url.params
+        if engine == "google_maps":
+            assert request.url.params["q"] == "下北沢駅"
+            assert request.url.params["ll"].startswith("@35.6615,139.667")
+            return json_response(
+                request,
+                {
+                    "local_results": [
+                        {
+                            "place_id": "fixture-place",
+                            "data_id": "fixture-data",
+                            "title": "下北沢駅",
+                            "address": "東京都世田谷区",
+                            "gps_coordinates": {
+                                "latitude": 35.6615,
+                                "longitude": 139.667,
+                            },
+                            "open_state": "Open",
+                            "open_hours": {
+                                "Monday": ["9:00 AM-6:00 PM"],
+                                "Tuesday": ["Closed"],
+                            },
+                        }
+                    ]
+                },
+            )
+        assert request.url.params["place_id"] == "fixture-place"
+        return json_response(
+            request,
+            {
+                "place_result": {
+                    "place_id": "fixture-place",
+                    "data_id": "fixture-data",
+                    "title": "下北沢駅",
+                    "address": "東京都世田谷区",
+                    "gps_coordinates": {"latitude": 35.6615, "longitude": 139.667},
+                    "business_status": "OPERATIONAL",
+                }
+            },
+        )
+
+    http, client = transport_client("searchapi", handler)
+    provider = SearchApiFlightProvider(api_key="fixture-credential", http=http)
+    try:
+        matches = await provider.search_places(
+            PlaceFactsSearchQuery(
+                query="下北沢駅",
+                coordinate_hint=GeoCoordinate(latitude=35.6615, longitude=139.667),
+            )
+        )
+        details = await provider.place_details(
+            PlaceDetailsQuery(place_id=matches.candidates[0].place_id)
+        )
+    finally:
+        await client.aclose()
+    assert engines == ["google_maps", "google_maps_place"]
+    assert matches.candidates[0].match_confidence == 1
+    assert matches.candidates[0].opening_windows[0].opens_at is not None
+    assert matches.candidates[0].opening_windows[1].opens_at is None
+    assert matches.candidates[0].opening_windows[1].raw_text == "Closed"
+    assert details.candidates[0].match_confidence == 1
+    assert details.candidates[0].temporarily_closed is False
 
 
 def test_imported_points_drop_invalid_and_route_a_deduplicates_with_sources(tmp_path: Any) -> None:

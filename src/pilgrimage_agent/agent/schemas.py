@@ -109,11 +109,32 @@ class ConversationEventPayload(StrictModel):
     content: str = Field(min_length=1, max_length=2000)
     intent: ConversationIntent
     action: ConversationAction = Field(default_factory=ConversationAction)
+    memory_kind: Literal[
+        "ordinary", "hard_constraint", "confirmation", "rejection"
+    ] = "ordinary"
 
 
 class ConversationMessage(ConversationEventPayload):
     message_id: UUID
     created_at: datetime
+
+
+class ConversationSummaryPayload(StrictModel):
+    """Traceable prompt summary; the source messages remain immutable events."""
+
+    source_first_message_id: UUID
+    through_message_id: UUID
+    summarized_message_count: int = Field(ge=1)
+    summary: str = Field(min_length=1, max_length=8000)
+    critical_decisions: tuple[str, ...] = Field(default=(), max_length=120)
+
+
+class ConversationPromptWindow(StrictModel):
+    """Budgeted context passed to a conversational reasoning boundary."""
+
+    summary: str | None = Field(default=None, max_length=8000)
+    critical_decisions: tuple[str, ...] = Field(default=(), max_length=120)
+    recent_messages: tuple[ConversationMessage, ...] = Field(max_length=12)
 
 
 class ConversationRequest(StrictModel):
@@ -183,6 +204,21 @@ class ReviewerInput(StrictModel):
 class ReviewerOutput(StrictModel):
     action: Literal["accept", "revise"]
     target_day: int | None = Field(default=None, ge=1, le=30)
+    explanation: str = Field(min_length=1, max_length=500)
+
+
+class WorkspaceReplannerInput(StrictModel):
+    context_snapshot_id: str = Field(min_length=1, max_length=120)
+    target_day: int = Field(ge=1, le=30)
+    reviewer_explanation: str = Field(min_length=1, max_length=500)
+    deterministic_violations: tuple[str, ...]
+    stable_day_numbers: tuple[int, ...]
+    revision_count: int = Field(ge=0, le=3)
+
+
+class WorkspaceReplannerOutput(StrictModel):
+    action: Literal["apply_targeted_revision", "stop_partial"]
+    target_day: int = Field(ge=1, le=30)
     explanation: str = Field(min_length=1, max_length=500)
 
 

@@ -14,12 +14,16 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from pilgrimage_agent.config import Settings
 from pilgrimage_agent.domain.models import (
+    DirectionsQuery,
     FlexibleFlightQuery,
     FlightSearchQuery,
     MatrixQuery,
     PilgrimagePointQuery,
+    PlaceDetailsQuery,
+    PlaceFactsSearchQuery,
     PlaceSearchQuery,
     SubjectSearchQuery,
+    TransitRouteQuery,
     WeatherForecastQuery,
 )
 from pilgrimage_agent.providers.service import ProviderServices
@@ -35,6 +39,9 @@ ALLOWED_AGENT_TOOLS = frozenset(
         "get_weather_forecast",
         "search_flight_options",
         "search_flexible_flight_dates",
+        "search_transit_options",
+        "search_place_facts",
+        "get_place_facts",
     }
 )
 _DICT = TypeAdapter(dict[str, object])
@@ -142,6 +149,10 @@ class FixtureAgentToolClient:
             )
         elif name == "get_route_matrix":
             result = await self.services.ors.matrix(MatrixQuery.model_validate(arguments))
+        elif name == "get_route_directions":
+            result = await self.services.ors.directions(
+                DirectionsQuery.model_validate(arguments)
+            )
         elif name == "geocode_place":
             result = await self.services.ors.geocode(
                 PlaceSearchQuery.model_validate(arguments)
@@ -157,6 +168,18 @@ class FixtureAgentToolClient:
         elif name == "search_flexible_flight_dates":
             result = await self.services.flights.flexible(
                 FlexibleFlightQuery.model_validate(arguments)
+            )
+        elif name == "search_transit_options":
+            result = await self.services.searchapi.transit(
+                TransitRouteQuery.model_validate(arguments)
+            )
+        elif name == "search_place_facts":
+            result = await self.services.searchapi.search_places(
+                PlaceFactsSearchQuery.model_validate(arguments)
+            )
+        elif name == "get_place_facts":
+            result = await self.services.searchapi.place_details(
+                PlaceDetailsQuery.model_validate(arguments)
             )
         else:
             raise NotImplementedError(f"Fixture tool {name} is not needed by this graph path")

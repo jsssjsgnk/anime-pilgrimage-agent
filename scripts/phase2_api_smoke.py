@@ -36,7 +36,12 @@ def main() -> int:
     points = route.get("points")
     if not isinstance(points, list) or not points:
         raise RuntimeError("Route A returned no points")
-    identities: set[tuple[str, float, float]] = set()
+    if len(points) < 400:
+        raise RuntimeError(
+            "Route A did not use the complete static Anitabi collection "
+            f"({len(points)} points)"
+        )
+    scene_ids: set[str] = set()
     for point in points:
         source = point.get("provenance", {}).get("source_url")
         latitude = point.get("latitude")
@@ -47,10 +52,12 @@ def main() -> int:
             raise RuntimeError("Route A contains an invalid latitude")
         if not isinstance(longitude, int | float) or not -180 <= longitude <= 180:
             raise RuntimeError("Route A contains an invalid longitude")
-        identity = (str(point.get("name", "")).casefold(), round(latitude, 5), round(longitude, 5))
-        if identity in identities:
-            raise RuntimeError("Route A contains a duplicate point")
-        identities.add(identity)
+        scene_id = point.get("id")
+        if not isinstance(scene_id, str) or not scene_id:
+            raise RuntimeError("Route A contains a point without a stable scene ID")
+        if scene_id in scene_ids:
+            raise RuntimeError("Route A contains an exact duplicate scene ID")
+        scene_ids.add(scene_id)
     print(f"Subject confirmation and Route A smoke passed with {len(points)} sourced points")
     return 0
 

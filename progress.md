@@ -483,3 +483,93 @@
 - The second aggregate run passed Phase 1 (136 Python tests, 9 Web tests) and stopped on the old Phase 2 browser copy assertion `2 部作品`. The editable collection now reports the more precise selected-entry count, so the compatibility assertion was updated to `已选 2 个条目` for desktop/mobile.
 - The corrected Phase 2 gate passed, followed by a complete `make verify-all` pass. Final acceptance: 136 Python tests at 81.17% coverage, 9 Web unit tests, 14 desktop/mobile E2E scenarios, clean Compose rebuild/recovery, real E5/pgvector RAG, secret/privacy scans, all six historical phase reports, and remediation scenarios A-J.
 - **Status:** complete; the running stack serves the new Web bundle and all four project services are healthy.
+
+### 2026-07-15 - Phase 19 authoritative Agent-runtime remediation
+
+- **Status:** in progress
+- Read the repository `AGENTS.md` and began a UTF-8, chunked read of the 976-line authoritative handoff.
+- Restored the existing file-based plan and preserved all completed Phase 1–18 records.
+- Intake Git snapshot: checked out `codex/publish-current-project`; only `CODEX_REMEDIATION_HANDOFF.md` is untracked, with no tracked or staged changes.
+- No project implementation files have been modified yet.
+- Read authoritative handoff lines 221–780 and recorded the runtime/context, real Handoff lifecycle, MiriaGo static ingestion, provider, planner, PlanPatch/deletion, and RAG requirements.
+- Completed the full 976-line handoff read.
+- Fetched `origin/codex/publish-current-project` without changing the worktree. Local HEAD, remote HEAD, and review baseline are all exactly `c544c3b9c1010d17e3a117c73ae273c489c0af56`; there are no later commits to preserve beyond the untracked handoff.
+- First aggregate baseline invocation used an accidental one-second shell timeout and was killed before producing test evidence; it is not counted as a product failure.
+- Baseline `make verify-all` completed successfully in 579.7 seconds: 136 Python tests (81.17% coverage), 9 Web unit tests, 14 desktop/mobile E2E tests, six phase reports, clean Compose/RAG recovery, and remediation A–J all passed.
+- The baseline Compose smoke loaded only 74 Anitabi points, so this PASS is retained as regression evidence but not treated as acceptance of the new completeness or Agent-runtime requirements.
+- Read README and inventoried all current source/test entry points. Initial call-chain search confirms `/api/workspaces` uses `WorkspaceAgent` directly while the only LangGraph and configured Reviewer belong to the separate legacy workflow.
+- Read the workspace API runtime/routes and the key `WorkspaceAgent` planning/patch paths. Confirmed fake-completed handoffs, context-only Reviewer/Replanner, direct deterministic execution, and unconditional eligible replanning are current implementation gaps.
+- Audited workspace/handoff/context schemas and SQL projections. Existing bounded RoleContext and normalized tables are reusable, while lifecycle fields, graph state/checkpoint references, run/tool audit, and deletion operations remain incomplete.
+- Audited the Anitabi provider, point schemas, MCP allowlist, composition, config, and tests. Confirmed the code is detail-endpoint-only and lacks every MiriaGo static index/page/version/completeness contract required by the handoff.
+- Audited PlanPatch operations, impact analysis, store protocols, API routes, and behavior tests. Confirmed clear/remove/version/archive/delete/undo semantics and all required deletion acceptance tests are absent.
+- Audited SearchAPI/MCP, workspace curation, canonical resolution, DBSCAN, and hierarchical planning. Confirmed flights-only SearchAPI, no travel tools in workspace planning, forbidden source-label merging, order-sensitive border handling, and the exact one-area-per-day slice remain.
+- Audited Web intake, workspace API surface, conversation reconstruction, LLM boundaries, and RAG integration. Confirmed hard-coded trip defaults/identity, latest-50 context, missing workspace resume/audit/delete endpoints, and reusable but disconnected LLM/RAG primitives.
+- Read the handoff-referenced MiriaGo static client/reader source and recorded the exact compact index/page field layout, filename guard, origin fallback, and page-selection behavior before implementing the adapter.
+- Implemented the initial MiriaGo static Adapter slice, completeness metadata, detail fallback, Workspace summary, Web disclosure, and focused contracts.
+- First lint pass stopped on three mechanical findings (self-reference annotation, import order, unused import); no tests ran in that invocation.
+- MiriaGo static fixtures, API/Workspace disclosure, Web completeness rendering, lint, and strict Python/Web typing passed; focused acceptance reached 28 Python and 10 Web tests.
+- The first live static smoke honestly returned 406/414 because eight optional `seconds` values were non-numeric strings. MiriaGo's source keeps such points and omits only the timestamp; the Adapter now matches that rule and the repeated live smoke passed 414/414 with zero warnings.
+- The first aggregate Phase 2 rerun stopped before Compose after 140 tests passed because `detail_then_imported` had not been added to the value-safe diagnostic Literal. The schema and regression assertion were corrected; rerun the full gate from the start.
+- The next Phase 2 run reached a healthy rebuilt Compose stack but Route A exposed only 394/414 records. The loss was a compatibility-view name/coordinate dedupe; Route A now deduplicates exact stable point IDs only, preserving distinct Anitabi scenes at the same real place for later CanonicalPlace resolution.
+- The rebuilt API then returned all 414 records, but the legacy smoke repeated the same name/coordinate duplicate rule. Acceptance now checks stable Scene ID uniqueness instead of rejecting valid multi-scene real-place overlap.
+- Backend live/Compose acceptance passed: Route A 414 scenes, Anitabi static 414/414, and one read-only Bangumi/ORS/Open-Meteo request each; SearchAPI was explicitly skipped with zero requests because live smoke is disabled. Desktop E2E passed; mobile needed to switch from the map pane to the itinerary-information pane before checking the new completeness disclosure.
+- **Independent item complete:** the final Phase 2 gate passed with 142 Python tests, 10 Web unit tests, healthy four-service Compose, 414-point API/live static acceptance, MCP allowlist/schema checks, and 4/4 desktop/mobile E2E. SearchAPI remained explicitly skipped with zero live requests.
+- **Next item:** replace direct WorkspaceAgent API execution with the authoritative Workspace LangGraph path, durable interrupts/checkpoints, real Handoff transitions, and actual Reviewer/Replanner calls.
+- **Independent item complete:** `/api/workspaces` now executes through a durable Workspace LangGraph with separate requirement, subject, point, place-curation, travel-area, planning, validation, reviewer, and bounded-replanner nodes. Subject and access/base confirmations resume the same checkpoint.
+- Handoffs now carry started timestamps, correlation/parent identifiers, and strict pending/running/terminal invariants. Reviewer pending and running states are independently checkpointed before execution.
+- The configured LLM Reviewer and Replanner are called through strict schemas. Missing or failed LLM boundaries return explicit partial/failed results and never substitute a fixture result in production.
+- Target-day replanning creates a parented version and `PlanVersionDiff`, freezes all non-target days, reruns deterministic planning/validation, and re-enters Reviewer with a bounded revision count.
+- Phase 4 initially failed only because MiriaGo static scene image URLs lacked the old detail endpoint's `plan=h360` query. The Web now normalizes every scene image display URL; focused desktop/mobile E2E passed 2/2.
+- Final Phase 4 rerun passed: Python/Web lint and strict types, 19 Agent/context/API fixtures, 10 Web unit tests, secret scan, healthy Compose, five PostgreSQL stores, restart checkpoint recovery, one real structured-output LLM smoke, and 6/6 desktop/mobile E2E.
+- **Next item:** implement explicit clear/archive/delete/restore semantics so an empty schedule remains empty and no fallback itinerary is regenerated.
+- **Independent item complete:** explicit `clear_schedule`, `clear_day`, `restore_itinerary_version`, `delete_itinerary_version`, `archive_workspace`, and transactional `delete_workspace` semantics are implemented.
+- Clearing the whole schedule moves immutable versions to trip-owned archive state, retains the candidate graph, returns `ready_to_plan`, and never invokes planning. Clearing one day creates auditable child versions with `user_removed` omissions and no candidate refill.
+- Permanent deletion validates owner/thread, cascades trip-owned relational projections and events, and deletes LangGraph checkpoint rows in the same PostgreSQL transaction. Recreating the same trip ID starts at state version 1, proving no checkpoint resurrection.
+- The consumer UI now distinguishes local close, archive-and-close, and permanent delete. Permanent deletion requires a second explicit click and explains the irreversible scope.
+- Acceptance passed: 125 Python unit tests, 11 Web unit tests, full lint/typecheck, healthy Compose clear/delete/recreate smoke, 6/6 desktop/mobile E2E, and the complete Phase 4 gate.
+- **Next item:** extend SearchAPI with transit and place facts, then connect flight/weather/transit/facts tool outcomes to the Workspace graph without any booking or payment surface.
+## 2026-07-15 - read-only travel facts in the Workspace graph
+
+- Added strict normalized transit and place-fact schemas plus cached SearchAPI directions,
+  place search, and exact place-detail adapters.
+- Expanded the exact MCP allowlist from 9 to 12 read-only tools; no booking, payment,
+  arbitrary URL, or write capability was added.
+- Added Access, Place Facts, and Weather nodes to the authoritative Workspace LangGraph
+  with checkpoint-visible pending/running/terminal Handoff states.
+- Persisted bounded access candidates, place facts, weather, and provider snapshot metadata
+  in WorkspaceState. Low-confidence name matches and out-of-window forecasts remain unknown.
+- Verification: lint/typecheck PASS; 154 Python tests PASS; 11 Web tests PASS;
+  Phase 2 Compose gate PASS with four healthy services, MCP 12/12, Anitabi 414/414,
+  and desktop/mobile E2E 4/4.
+- Live SearchAPI transit/place remains explicitly UNVERIFIED because live smoke is disabled;
+  fixture contract coverage is PASS.
+## 2026-07-15 - identity-safe clustering and time-dependent planning
+
+- Removed source-label identity merging, added an ECEF spatial candidate index, preserved
+  uncertain nearby pairs as ambiguous, and bumped canonical resolution to v2.
+- Fixed DBSCAN noise-to-border reassignment and bumped stable travel-area clustering to v2.
+- Added bounded ORS walking edges and nearby-area transit edges to WorkspaceState.
+- Removed the one-area-per-day truncation. The planner now composes multiple areas per day,
+  consumes walking/transit edges, opening facts, weather, and access buffers, and validates
+  provenance/TTL, overlap, exclusions, and arrival/departure buffers.
+- Added structured transit route preferences and deterministic Chinese fallback extraction.
+- Verification: 163 Python tests, 11 Web tests, lint and strict types PASS; Phase 4 Compose
+  PASS including PostgreSQL checkpoint restart, transactional deletion, a real structured
+  Reviewer call, and desktop/mobile E2E 6/6.
+
+## 2026-07-15 - Phase 19 final remediation acceptance
+
+- Completed the remaining session-isolation, safe-warning, knowledge-retrieval, multi-subject,
+  and browser acceptance gaps without replacing the authoritative Workspace Agent graph.
+- Fixed upstream PlanPatch subject additions so the durable graph is rebased from the current
+  database workspace, then resumes typed multi-subject confirmation without losing existing work.
+- Corrected root LangGraph checkpoint identity: the product version now lives in the hashed
+  thread key instead of misusing `checkpoint_ns`, which LangGraph reserves for subgraphs.
+- Phase 5 passed with 167 Python tests at 81.50% coverage, 15 Web unit tests, real 384-dimensional
+  E5, SQL pgvector/BM25/RRF, and 14/14 desktop/mobile E2E scenarios.
+- Phase 6 passed from empty project Compose volumes, including migrations, recovery/isolation,
+  privacy/MCP audits, API demos, and 14/14 desktop/mobile E2E scenarios.
+- `make verify-remediation` passed acceptance A-J.
+- Final `make verify-all` exited 0 in 2079 seconds and reran all six phase gates plus remediation
+  A-J from the same working tree. Live SearchAPI transit/place checks remain explicitly unverified
+  when live smoke is disabled; fixture contracts pass and no live PASS is fabricated.

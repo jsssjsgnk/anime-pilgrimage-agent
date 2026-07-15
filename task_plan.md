@@ -154,6 +154,17 @@ Phase 17 in progress — arbitrary work discovery and recovery
 - [x] Rebuild the running stack, run focused gates and `make verify-all`, then commit and push
 - **Status:** complete (`make verify-all` PASS; commit and push follow in this handoff)
 
+### Phase 19: Authoritative Agent-runtime remediation
+- [x] Fully read `CODEX_REMEDIATION_HANDOFF.md` and map every requirement to current code/tests
+- [x] Confirm branch/head against review baseline `c544c3b` and preserve all later/user changes
+- [x] Run the existing regression suite and record an honest baseline, including live/fixture boundaries
+- [x] Implement the Workspace LangGraph main chain, durable interrupts, real handoffs, and actual Requirement/Reviewer/Replanner boundaries
+- [x] Continue verified gaps in dependency order, prioritizing deletion semantics, tool constraints, travel Providers, planning, context, and RAG
+- [x] Adopt the handoff-specified MiriaGo static-data path for complete Anitabi points
+- [x] Add unit, API, Web/E2E, and Compose acceptance for every independent work item
+- [x] Run focused gates after each work item and finish with the aggregate acceptance gate
+- **Status:** complete (`make verify-all` PASS; remediation A-J PASS)
+
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
 2. What code already exists, and which unrelated user changes must be preserved?
@@ -174,6 +185,12 @@ Phase 17 in progress — arbitrary work discovery and recovery
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
+| Baseline `make verify-all` wrapper was given a one-second command timeout and was terminated before tests started | 1 | Record it as an execution error, then rerun with a long bounded command budget and streamed polling |
+| First static-Adapter lint pass found one self-reference annotation, one import-order issue, and one unused test import | 1 | Apply the three mechanical corrections before rerunning lint and strict typing |
+| First Phase 19 Phase 2 gate found the new Anitabi fallback diagnostic value absent from its Literal schema | 1 | Extend the value-safe diagnostic enum, assert the fallback chain, and rerun the full gate before Compose acceptance |
+| Rebuilt Route A exposed 394 records although the static Provider loaded 414/414 | 1 | Remove name/coordinate scene dedupe from the compatibility view; dedupe only exact stable IDs and leave real-place merging to CanonicalPlace resolution |
+| Phase 2 API smoke rejected the corrected 414 records because its old uniqueness check still used name and coordinates | 1 | Make acceptance assert stable Scene ID uniqueness, allowing multiple source scenes at one CanonicalPlace candidate |
+| Mobile Phase 2 E2E searched for the context-only data disclosure while the map pane was active | 1 | Assert the map first, switch to the mobile itinerary-information tab for completeness, then return to the map for evidence capture |
 | Duplicate goal creation rejected because this task already had an active goal | 1 | Retrieved and continued the existing goal |
 | PowerShell decoded UTF-8 Chinese handoff text with the legacy console encoding | 1 | Re-read handoff files explicitly with `-Encoding UTF8` |
 | Initial `conda env create` exceeded the 120-second command budget without emitting an error | 1 | Inspect partial environment state, then use a bounded alternative instead of repeating blindly |
@@ -294,3 +311,6 @@ Phase 17 in progress — arbitrary work discovery and recovery
 - Never book, pay, deploy, publish, message externally, or create external resources without explicit authorization.
 - Use only the `anime-pilgrimage-agent` Conda environment and repository-scoped Docker resources.
 - Preserve unrelated changes and never use destructive Git commands.
+- [x] Integrate read-only flight/transit/place/weather facts into the authoritative Workspace graph with real Handoff lifecycle and bounded ProviderSnapshots.
+- [x] Correct the three-layer place/travel-area clustering and add ORS/transit calibration.
+- [x] Upgrade Planner/Validator to consume access windows, opening hours, weather risk, and real matrices.

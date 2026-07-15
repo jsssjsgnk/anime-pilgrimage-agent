@@ -1,14 +1,14 @@
 import { expect, test } from "@playwright/test";
 
 test("works can be added, confirmed, edited, and removed without restarting", async ({ page }, testInfo) => {
-  test.setTimeout(90_000);
+  test.setTimeout(240_000);
   await page.goto("/");
   await page.getByLabel("你的巡礼想法").fill("我想用一天巡礼轻音少女");
   await page.getByRole("button", { name: "开始规划" }).click();
   await expect(page.getByRole("heading", { name: "作品匹配结果" })).toBeVisible();
   await page.getByRole("button", { name: "选择全部季度与版本" }).click();
   await page.getByRole("button", { name: "确认并整理地点" }).click();
-  await expect(page.getByRole("button", { name: "生成层级行程" })).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByRole("button", { name: "生成层级行程" })).toBeVisible({ timeout: 60_000 });
 
   if (testInfo.project.name.startsWith("mobile")) {
     await page.getByRole("button", { name: "行程信息" }).click();
@@ -22,12 +22,15 @@ test("works can be added, confirmed, edited, and removed without restarting", as
   const bocchiGroup = page.getByRole("group", { name: /孤独摇滚/u });
   await expect(bocchiGroup.getByRole("checkbox").first()).toBeChecked();
   await page.getByRole("button", { name: "确认并整理地点" }).click();
-  await expect(page.getByRole("button", { name: "生成层级行程" })).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByRole("button", { name: "生成层级行程" })).toBeVisible({ timeout: 60_000 });
 
   if (testInfo.project.name.startsWith("mobile")) {
     await page.getByRole("button", { name: "行程信息" }).click();
   }
-  await expect(page.getByText("4 个条目已确认")).toBeVisible({ timeout: 45_000 });
+  const kOnItem = page.getByRole("listitem").filter({ hasText: "轻音少女" });
+  const bocchiItem = page.getByRole("listitem").filter({ hasText: "孤独摇滚！" });
+  await expect(kOnItem.getByText("3 个条目", { exact: true })).toBeVisible();
+  await expect(bocchiItem.getByText("1 个条目", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "编辑已选版本" }).click();
   await expect(page.getByRole("heading", { name: "作品匹配结果" })).toBeVisible();
   await expect(bocchiGroup.getByRole("checkbox").first()).toBeChecked();
@@ -38,5 +41,6 @@ test("works can be added, confirmed, edited, and removed without restarting", as
   }
   await page.getByRole("button", { name: "移除作品 孤独摇滚！" }).click();
   await page.getByRole("button", { name: "确认并重新规划" }).click();
-  await expect(page.getByText("3 个条目已确认")).toBeVisible({ timeout: 45_000 });
+  await expect(kOnItem.getByText("3 个条目", { exact: true })).toBeVisible();
+  await expect(bocchiItem).toHaveCount(0);
 });

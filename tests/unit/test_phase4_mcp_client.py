@@ -36,9 +36,34 @@ async def test_fixture_agent_client_calls_normalized_allowlisted_tools() -> None
     points = await client.call(
         "fetch_pilgrimage_points", {"subject_id": "328609", "provider": "fixture"}
     )
+    transit = await client.call(
+        "search_transit_options",
+        {
+            "origin": "Shinjuku",
+            "destination": "Shimokitazawa",
+            "time_mode": "depart_at",
+            "at": "2030-02-01T09:00:00+09:00",
+        },
+    )
+    places = await client.call(
+        "search_place_facts",
+        {
+            "query": "Shimokitazawa Station",
+            "coordinate_hint": {"latitude": 35.6615, "longitude": 139.667},
+        },
+    )
+    place_candidates = places["candidates"]
+    assert isinstance(place_candidates, list)
+    assert isinstance(place_candidates[0], dict)
+    details = await client.call(
+        "get_place_facts", {"place_id": place_candidates[0]["place_id"]}
+    )
     assert subjects["candidates"]
     assert isinstance(points["points"], list)
     assert len(points["points"]) == 3
+    assert transit["options"]
+    assert places["candidates"]
+    assert details["candidates"]
     with pytest.raises(ValueError, match="non-allowlisted"):
         await client.call("book_flight", {})
 

@@ -6,6 +6,10 @@ from typing import Protocol
 from uuid import UUID
 
 from pilgrimage_agent.domain.models import ConfirmedSubject, TripRequest
+from pilgrimage_agent.rag.rules import (
+    KnowledgeRuleProposalBatch,
+    KnowledgeRuleProposalInput,
+)
 from pilgrimage_agent.rag.schemas import KnowledgeQuery, KnowledgeSearchResult
 from pilgrimage_agent.rag.sql import SqlRagRepository
 
@@ -19,6 +23,12 @@ class KnowledgeRetriever(Protocol):
         request: TripRequest,
         subject: ConfirmedSubject,
     ) -> KnowledgeSearchResult: ...
+
+
+class KnowledgeRuleProposer(Protocol):
+    async def propose(
+        self, request: KnowledgeRuleProposalInput
+    ) -> KnowledgeRuleProposalBatch: ...
 
 
 class SqlKnowledgeRetriever:
@@ -65,3 +75,13 @@ class EmptyKnowledgeRetriever:
     ) -> KnowledgeSearchResult:
         del owner_user_id, trip_id, request, subject
         return KnowledgeSearchResult(status="insufficient_evidence", evidence=())
+
+
+class EmptyKnowledgeRuleProposer:
+    """Safe offline boundary: absence of an LLM never fabricates a rule."""
+
+    async def propose(
+        self, request: KnowledgeRuleProposalInput
+    ) -> KnowledgeRuleProposalBatch:
+        del request
+        return KnowledgeRuleProposalBatch()

@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-07-14T18:25:39.140877+00:00",
+  "generated_at": "2026-07-15T08:18:06.085465+00:00",
   "phase_status": {
     "1": "PASS",
     "2": "PASS",
@@ -21,10 +21,10 @@
   },
   "security": {
     "schema_version": "1",
-    "files_scanned": 49,
+    "files_scanned": 50,
     "local_secret_exposures": 0,
     "conversation_body_exposures": 0,
-    "mcp_tool_count": 9,
+    "mcp_tool_count": 12,
     "forbidden_mcp_tool_count": 0,
     "forbidden_mcp_tools": []
   },

@@ -1,5 +1,7 @@
 """The remediated workspace Agent keeps multi-subject work explicit and partial-safe."""
 
+# ruff: noqa: RUF001 -- Chinese test inputs preserve realistic punctuation.
+
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import ClassVar
@@ -8,10 +10,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from pilgrimage_agent.agent.workspace import (
+    ClearWorkspaceDayRequest,
     ConfirmWorkspaceSubjectsRequest,
     PlanWorkspaceRequest,
     SubjectConfirmation,
     WorkspaceAgent,
+    WorkspaceMutationRequest,
     WorkspaceStartRequest,
     WorkspaceState,
     WorkspaceStatus,
@@ -54,9 +58,7 @@ class MultiSubjectTools:
         "天气之子": "weathering",
     }
 
-    async def call(
-        self, name: str, arguments: Mapping[str, object]
-    ) -> dict[str, object]:
+    async def call(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
         if name == "search_anime_subjects":
             query = str(arguments["query"])
             subject_id = self.subject_ids[query]
@@ -120,9 +122,7 @@ class MultiSubjectTools:
 
 
 class MultiSeasonTools:
-    async def call(
-        self, name: str, arguments: Mapping[str, object]
-    ) -> dict[str, object]:
+    async def call(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
         if name == "search_anime_subjects":
             search_result = SubjectSearchResult(
                 candidates=tuple(
@@ -174,11 +174,46 @@ def _requirements() -> TripRequest:
         start_date=start,
         end_date=start + timedelta(days=1),
         anime_query="孤独摇滚",
-        subject_intents=(
-            SubjectIntent(query="孤独摇滚", is_primary=True, priority=5),
-        ),
+        subject_intents=(SubjectIntent(query="孤独摇滚", is_primary=True, priority=5),),
         walking_preference="medium",
     )
+
+
+@pytest.mark.asyncio
+async def test_explicit_dates_and_subjects_do_not_replace_natural_requirements() -> None:
+    agent = WorkspaceAgent(MultiSubjectTools())
+    start = date.today() + timedelta(days=30)
+
+    requirements = await agent.extract_requirements(
+        WorkspaceStartRequest(
+            owner_user_id="user-1",
+            thread_id="thread-1",
+            request_summary=(
+                "从京都出发去东京，住新宿附近，巡礼《孤独摇滚！》和《莉可丽丝》，"
+                "每天尽量少走路。"
+            ),
+            requirements=TripRequest(
+                start_date=start,
+                end_date=start + timedelta(days=2),
+                subject_intents=(
+                    SubjectIntent(query="孤独摇滚！", is_primary=True, priority=5),
+                    SubjectIntent(query="莉可丽丝", priority=4),
+                ),
+            ),
+        )
+    )
+
+    assert requirements.origin == "京都"
+    assert requirements.destination == "东京"
+    assert requirements.base_preference == "新宿附近"
+    assert requirements.walking_preference == "low"
+    assert requirements.transit_route_preference == "less_walking"
+    assert requirements.start_date == start
+    assert requirements.end_date == start + timedelta(days=2)
+    assert [item.query for item in requirements.subject_intents] == [
+        "孤独摇滚！",
+        "莉可丽丝",
+    ]
 
 
 @pytest.mark.asyncio
@@ -194,9 +229,7 @@ async def test_one_intent_can_confirm_multiple_seasons_and_merge_their_place() -
                 destination="京都",
                 start_date=start,
                 end_date=start,
-                subject_intents=(
-                    SubjectIntent(query="轻音少女", is_primary=True, priority=5),
-                ),
+                subject_intents=(SubjectIntent(query="轻音少女", is_primary=True, priority=5),),
             ),
         )
     )
@@ -218,6 +251,12 @@ async def test_one_intent_can_confirm_multiple_seasons_and_merge_their_place() -
     )
 
     assert len(confirmed.confirmed_subjects) == 2
+    assert all(item.point_collection is not None for item in confirmed.confirmed_subjects)
+    assert all(
+        item.point_collection.loaded_count == item.point_collection.expected_count == 1
+        for item in confirmed.confirmed_subjects
+        if item.point_collection is not None
+    )
     assert confirmed.requirements.subject_intents[0].catalog_subject_ids == (
         "1424",
         "3774",
@@ -275,9 +314,7 @@ async def _planned_workspace() -> tuple[WorkspaceAgent, WorkspaceState]:
 @pytest.mark.asyncio
 async def test_work_collection_add_confirm_and_remove_preserves_other_subjects() -> None:
     agent, planned = await _planned_workspace()
-    original_subject_ids = {
-        item.subject.subject_id for item in planned.confirmed_subjects
-    }
+    original_subject_ids = {item.subject.subject_id for item in planned.confirmed_subjects}
     original_evidence_ids = {item.evidence_id for item in planned.evidence}
     added_intent = SubjectIntent(query="天气之子", priority=3)
     add_patch = PlanPatch(
@@ -329,21 +366,16 @@ async def test_work_collection_add_confirm_and_remove_preserves_other_subjects()
         requires_confirmation=True,
         idempotency_key=f"test-remove:{uuid4()}",
         created_at=datetime.now(UTC),
-        operations=(
-            SubjectIntentOperation(action="remove", intent_id=added_intent.intent_id),
-        ),
+        operations=(SubjectIntentOperation(action="remove", intent_id=added_intent.intent_id),),
     )
     proposed_remove, remove_preview = agent.propose_patch(refreshed, remove_patch)
-    removed = await agent.apply_patch(
-        proposed_remove, remove_preview.patch.patch_id, confirm=True
-    )
+    removed = await agent.apply_patch(proposed_remove, remove_preview.patch.patch_id, confirm=True)
 
     assert {item.subject.subject_id for item in removed.confirmed_subjects} == (
         original_subject_ids
     )
     assert all(
-        item.intent_id != added_intent.intent_id
-        for item in removed.requirements.subject_intents
+        item.intent_id != added_intent.intent_id for item in removed.requirements.subject_intents
     )
     assert removed.itineraries
 
@@ -355,10 +387,7 @@ async def test_three_subject_workspace_degrades_one_subject_without_data_loss() 
         WorkspaceStartRequest(
             owner_user_id="user-1",
             thread_id="thread-1",
-            request_summary=(
-                "两天巡礼《孤独摇滚》《莉可丽丝》《天气之子》,"
-                "主要巡礼《孤独摇滚》。"
-            ),
+            request_summary=("两天巡礼《孤独摇滚》《莉可丽丝》《天气之子》,主要巡礼《孤独摇滚》。"),
             requirements=_requirements(),
         )
     )
@@ -392,8 +421,7 @@ async def test_three_subject_workspace_degrades_one_subject_without_data_loss() 
     assert confirmed.status is WorkspaceStatus.PARTIAL_READY
     assert len(confirmed.confirmed_subjects) == 3
     evidence_statuses = {
-        item.subject.subject_id: item.evidence_status
-        for item in confirmed.confirmed_subjects
+        item.subject.subject_id: item.evidence_status for item in confirmed.confirmed_subjects
     }
     assert evidence_statuses == {
         "bocchi": "ok",
@@ -411,8 +439,7 @@ async def test_three_subject_workspace_degrades_one_subject_without_data_loss() 
     assert confirmed.areas
     assert any("天气之子" in item for item in confirmed.warnings)
     assert any(
-        item.sender is AgentRole.EVIDENCE_COLLECTOR
-        and item.receiver is AgentRole.PLACE_CURATOR
+        item.sender is AgentRole.EVIDENCE_COLLECTOR and item.receiver is AgentRole.PLACE_CURATOR
         for item in confirmed.handoffs
     )
 
@@ -472,14 +499,86 @@ async def test_workspace_plans_two_independent_versions_and_progressive_counts()
 
 
 @pytest.mark.asyncio
+async def test_clear_schedule_stays_empty_and_history_can_be_restored() -> None:
+    agent, planned = await _planned_workspace()
+    source_id = planned.itineraries[0].itinerary_id
+    cleared = agent.clear_schedule(
+        planned,
+        WorkspaceMutationRequest(
+            owner_user_id=planned.owner_user_id,
+            thread_id=planned.thread_id,
+            expected_state_version=planned.state_version,
+        ),
+    )
+    assert cleared.status is WorkspaceStatus.READY_TO_PLAN
+    assert cleared.itineraries == ()
+    assert cleared.candidate_graph == planned.candidate_graph
+    assert {item.itinerary_id for item in cleared.archived_itineraries} == {
+        item.itinerary_id for item in planned.itineraries
+    }
+
+    restored = agent.restore_itinerary(
+        cleared,
+        WorkspaceMutationRequest(
+            owner_user_id=cleared.owner_user_id,
+            thread_id=cleared.thread_id,
+            expected_state_version=cleared.state_version,
+        ),
+        source_id,
+    )
+    assert restored.itineraries[0].itinerary_id != source_id
+    assert restored.itineraries[0].parent_version == planned.itineraries[0].version
+    assert restored.itineraries[0].days == planned.itineraries[0].days
+
+
+@pytest.mark.asyncio
+async def test_clear_day_never_refills_and_only_inactive_versions_can_be_deleted() -> None:
+    agent, planned = await _planned_workspace()
+    active_count = len(planned.planning_strategies)
+    prior_ids = {item.itinerary_id for item in planned.itineraries[:active_count]}
+    cleared = agent.clear_day(
+        planned,
+        ClearWorkspaceDayRequest(
+            owner_user_id=planned.owner_user_id,
+            thread_id=planned.thread_id,
+            expected_state_version=planned.state_version,
+            day_number=1,
+        ),
+    )
+    assert all(not item.days[0].visits for item in cleared.itineraries[:active_count])
+    assert all(
+        any(omission.reason_code == "user_removed" for omission in item.omissions)
+        for item in cleared.itineraries[:active_count]
+    )
+    with pytest.raises(ValueError, match="active itinerary"):
+        agent.delete_itinerary_version(
+            cleared,
+            WorkspaceMutationRequest(
+                owner_user_id=cleared.owner_user_id,
+                thread_id=cleared.thread_id,
+                expected_state_version=cleared.state_version,
+            ),
+            cleared.itineraries[0].itinerary_id,
+        )
+    deleted = agent.delete_itinerary_version(
+        cleared,
+        WorkspaceMutationRequest(
+            owner_user_id=cleared.owner_user_id,
+            thread_id=cleared.thread_id,
+            expected_state_version=cleared.state_version,
+        ),
+        next(item for item in prior_ids),
+    )
+    assert not prior_ids.issubset({item.itinerary_id for item in deleted.itineraries})
+
+
+@pytest.mark.asyncio
 async def test_patch_preview_apply_revalidate_diff_and_idempotency() -> None:
     agent, planned = await _planned_workspace()
     walking_patch = PlanPatch(
         trip_id=planned.trip_id,
         expected_base_version=planned.state_version,
-        operations=(
-            UpdateRequirementOperation(field="walking_preference", value="low"),
-        ),
+        operations=(UpdateRequirementOperation(field="walking_preference", value="low"),),
         rationale="减少每天步行",
         requires_confirmation=True,
         idempotency_key="fixture:walking-low",
@@ -490,9 +589,7 @@ async def test_patch_preview_apply_revalidate_diff_and_idempotency() -> None:
     assert proposed.state_version == planned.state_version
     assert preview.patch.requires_confirmation is False
     assert preview.impact.validation_required is True
-    changed = await agent.apply_patch(
-        proposed, preview.patch.patch_id, confirm=False
-    )
+    changed = await agent.apply_patch(proposed, preview.patch.patch_id, confirm=False)
     assert changed.state_version == planned.state_version + 1
     assert changed.requirements.walking_preference == "low"
     assert changed.diffs[-1].changed_requirements == ("walking_preference",)
@@ -520,9 +617,7 @@ async def test_material_date_and_local_move_patches_preserve_explicit_boundaries
     date_patch = PlanPatch(
         trip_id=planned.trip_id,
         expected_base_version=planned.state_version,
-        operations=(
-            UpdateRequirementOperation(field="start_date", value=shifted_start),
-        ),
+        operations=(UpdateRequirementOperation(field="start_date", value=shifted_start),),
         rationale="整段行程延后一周",
         requires_confirmation=False,
         idempotency_key="fixture:shift-dates",
@@ -547,18 +642,12 @@ async def test_material_date_and_local_move_patches_preserve_explicit_boundaries
         created_at=datetime.now(UTC),
     )
     move_proposed, move_preview = agent.propose_patch(shifted, move_patch)
-    moved = await agent.apply_patch(
-        move_proposed, move_preview.patch.patch_id, confirm=False
-    )
+    moved = await agent.apply_patch(move_proposed, move_preview.patch.patch_id, confirm=False)
     current_versions = tuple(
-        itinerary
-        for itinerary in moved.itineraries
-        if itinerary.version == moved.state_version
+        itinerary for itinerary in moved.itineraries if itinerary.version == moved.state_version
     )
     historical_versions = tuple(
-        itinerary
-        for itinerary in moved.itineraries
-        if itinerary.version != moved.state_version
+        itinerary for itinerary in moved.itineraries if itinerary.version != moved.state_version
     )
     for itinerary in current_versions:
         assert place_id in {item.place_id for item in itinerary.days[1].visits}

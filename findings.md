@@ -330,3 +330,85 @@
 - Live product verification confirmed three K-On entries can remain selected while adding one Bocchi entry. The combined workspace changed from 178 scene records / 138 places / 30 areas to 252 records / 195 places / 43 areas, then editing out the K-On film preserved Bocchi and produced 201 records / 152 places / 32 areas.
 - A live browser pass exposed and fixed old nested candidate-group intent snapshots. Compatibility projection now derives each group intent from the authoritative requirements collection, so persisted workspaces also recover every selected season after reload.
 - The dedicated Phase 18 browser gate passes on desktop and mobile and covers add, confirm, edit selected versions, and remove without restarting.
+
+## 2026-07-15 Phase 19 authoritative remediation intake
+
+- `CODEX_REMEDIATION_HANDOFF.md` is an untracked user-supplied authority file and must be preserved.
+- The checked-out branch is `codex/publish-current-project`, tracking the matching origin branch; there are no tracked working-tree or index changes at intake.
+- Existing planning records report Phase 1–18 complete, so the new audit must prove current gaps against code and tests instead of reimplementing historical items.
+- The handoff's first 220 lines establish the primary defect: the multi-workspace product path bypasses the old LangGraph runtime, while Reviewer/Replanner/handoffs and travel tools are not genuinely executed on that path.
+- The handoff explicitly distinguishes exclusion, clearing the scheduled itinerary, deleting an itinerary version, and deleting a workspace; candidate exclusion must not silently refill a cleared itinerary.
+- Complete Anitabi ingestion must use the handoff-specified MiriaGo static-data approach and report completeness/source/version honestly.
+- Role contexts must be minimal and role-specific; the graph state stores stable structured state/references, while conversation events, preferences, TTL-bound provider facts, RAG knowledge, and execution audit remain separate layers.
+- Handoffs require a real pending → running → completed/partial/failed/cancelled lifecycle with run IDs, input/output references, timestamps, retries, and correlations; only validated receiver output can complete them.
+- The static Anitabi adapter must merge `g.json` coordinates with versioned `gN.json` details, search alternate pages on index/page skew, enforce allowlisted filenames/domains/body limits/timeouts/retries, and mark detail-endpoint fallback incomplete.
+- Map marker clustering, canonical-place identity resolution, and travel-area clustering are distinct algorithms. Canonical identity cannot use source/origin labels as place identity, and DBSCAN border assignment must be order-independent.
+- SearchAPI must normalize flights, transit, and place facts into TTL-bound outcomes; ORS supplies geocoding/walking/directions/matrices but not transit schedules; Open-Meteo long-range results remain unknown pending refresh.
+- The planner must use a time-dependent access/inter-area/intra-area/visit/base graph, may combine multiple reachable areas per day, generate materially distinct strategies, and keep all arithmetic/feasibility checks deterministic.
+- Plan operations must distinguish clear schedule/day, exclude/include candidate, remove visit, delete/restore itinerary version, archive, and permanent workspace deletion. Clearing a schedule must stop in `ready_to_plan` without refill.
+- RAG is limited to stable guidance/documents and proposed rules with evidence/acceptance; IDs, coordinates, real-time travel/weather/place facts, and arithmetic stay in structured provider snapshots.
+- The remainder of the handoff requires a mixed-initiative workspace without hard-coded origin/destination/walking defaults, natural-language impact previews, injected development identity, thin compatibility APIs, and visible source/update/warning state on desktop and mobile.
+- Acceptance must prove the new workspace actually enters LangGraph, Reviewer is called, Replanner limits impact, handoff timestamps/statuses reflect execution, interrupts survive reload, and LLM failure degrades honestly.
+- The definition of done also requires transactional workspace deletion (without deleting user-global knowledge), undo/restore as new audited versions, travel providers entering planning/validation, and honest PASS/FAIL/UNVERIFIED reporting.
+- After fetching the authoritative remote branch, local HEAD and `origin/codex/publish-current-project` both resolve exactly to review baseline `c544c3b9c1010d17e3a117c73ae273c489c0af56`; there are zero commits after the baseline.
+- At intake there were no tracked/staged user code changes after the baseline. The only pre-existing worktree item was the untracked authority handoff; current planning-file modifications are this session's bookkeeping.
+- Baseline `make verify-all` passed at exact baseline commit in 579.7 seconds: Python lint/typecheck, 136 tests at 81.17% coverage, 9 Web unit tests, 14 desktop/mobile E2E tests, six historical phase gates, clean Compose rebuild/recovery, and remediation A–J.
+- The passing baseline still reports only 74 sourced Anitabi points in the Compose demo. This is direct evidence that historical acceptance does not satisfy the new static-data completeness requirement.
+- Baseline live boundaries remain mixed: SQL/real-E5 and Compose infrastructure were exercised, while provider contract tests use fixtures and the output does not prove live SearchAPI transit/place/flight quotas or a real Workspace Reviewer call.
+- README currently claims `API → LangGraph workflow`, a durable LangGraph workflow, structured review, and current-user deletion, but its Known Limitations simultaneously documents detail-endpoint incompleteness and a latest-50-message strategy. These claims must be reconciled with the actual workspace path.
+- Source tracing shows `/api/workspaces` constructs and calls `WorkspaceAgent` directly. `ApplicationResources` separately builds the legacy `build_workflow(... reviewer=self.reviewer)`, while `WorkspaceAgent` is constructed without a reviewer boundary.
+- The only `StateGraph` implementation is `agent/graph.py`, and its Reviewer/Replanner coverage is exercised by legacy Phase 4 tests. Current workspace tests instantiate `WorkspaceAgent` directly, matching the handoff's core audit finding.
+- `workspace.py` has its own `_handoff()` helper and creates Reviewer/Replanner contexts, so the next audit must distinguish records/context preparation from actual receiver execution.
+- `ApplicationResources.workspace_agent` receives only the MCP tool client and optional requirement extractor. The configured `ResilientReviewer` is passed exclusively to the legacy `workflow_graph()`.
+- Every current workspace API operation (`start`, subject confirmation, plan, patch preview/apply, and messages) loads state and invokes `WorkspaceAgent` directly; there is no graph invoke/resume/checkpoint path for `/api/workspaces`.
+- `WorkspaceAgent._handoff()` writes `completed` immediately (or `partial` when a warning exists) with identical created/completed timestamps. It has no pending/running state, receiver execution, retry, result validation, started timestamp, or failure state.
+- `_execute_plan()` creates Reviewer contexts and a Validator→Reviewer handoff but never calls a Reviewer. Its workspace status depends only on deterministic itinerary validation issues.
+- Patch application creates a Replanner context after deterministic recomputation and then writes a Replanner→Validator handoff as already completed/partial. No bounded Replanner agent executes, and impact-directed graph routing is absent.
+- Current patch logic replans whenever itineraries/candidates/base/dates remain available. This explains why excluding every scheduled visit refills from the remaining candidate pool; explicit clear/remove/version/workspace operations are missing from this path.
+- `AgentHandoff` already models pending/running/terminal states, retry count, refs, warning/error, and completion time, but lacks `started_at`, `cancelled`, parent/correlation IDs, and an explicit result payload reference. The runtime bypasses even its existing lifecycle capacity.
+- `WorkspaceState` is a monolithic persisted state containing domain facts plus handoffs, contexts, patches, impacts, and warnings. There is no pending graph confirmation/checkpoint reference, validation report collection, reviewer assessment collection, provider snapshot refs, or AgentRun/ToolCall audit model.
+- RoleContextBuilder provides useful bounded, secret-free Reviewer/Replanner projections and should be reused in the graph rather than replaced. Its current builders contain sufficient starting facts/refs but are not connected to actual role execution.
+- Normalized itinerary/patch/handoff projection tables use trip-level `ON DELETE CASCADE`, but the repository/API currently expose no transactional workspace deletion path and handoff rows persist only created/completed timestamps.
+- Current `AnitabiProvider` calls only `api.anitabi.cn/bangumi/{id}/lite` plus `/points/detail`; there is no `g.json` index, `gN.json` page merge, version cache, alternate-page scan, refresh/clear, static host allowlist, or MiriaGo parser.
+- `PilgrimagePointResult` exposes only points/is_complete/warnings/provenance. It lacks `expected_count`, `loaded_count`, `data_version`, and an explicit static-vs-detail source field required by the handoff and UI.
+- Provider composition selects the detail API for `PILGRIMAGE_POINT_MODE=anitabi` and wraps it with legal-import fallback. The fallback mechanism and generic SafeHttpClient/cache/ToolOutcome boundaries are reusable, but detail fallback must remain `is_complete=false` after static failure.
+- The MCP allowlist/tool still uses `fetch_pilgrimage_points`; no `fetch_anitabi_static_points` exists. Existing acceptance asserts exactly nine tools, so adding transit/place/static boundaries will require intentional contract migration rather than hidden extra tools.
+- Existing Anitabi tests prove detail normalization, mismatch disclosure, and cache reuse only. They do not cover the six new static-data scenarios. Current remediation acceptance labels diagnostics/live browser evidence as sufficient despite the Compose smoke loading 74/414.
+- PlanPatch currently supports requirement, subject-intent, place include/exclude/move/reorder, selection, knowledge, and merge-decision operations only. There are no clear-schedule/day, remove-visit, itinerary delete/restore, archive, delete-workspace, or undo operations.
+- `confirmation_required()` does not treat place exclusion as material, and natural-language parsing is UUID-oriented and lacks the handoff's clear/undo/restore/delete intents.
+- Impact analysis names invalidated nodes but no graph consumes those names; workspace application still recomputes directly. The useful stable/invalidated reference policy can become routing input for the new graph.
+- `ProjectStore` supports trips/events/preferences but no trip deletion; `WorkspaceRepository` only saves normalized projections. No workspace DELETE, clear, itinerary restore/delete, archive, or checkpoint cleanup API exists in backend or Web.
+- Existing collection-removal tests intentionally assert itineraries are regenerated/preserved; there is no regression for clearing all scheduled visits without refill, single-day stability, version restore, transactional deletion, or global-knowledge preservation.
+- SearchAPI implements only Google Flights and flight calendar. There are no transit-directions or Google Maps/place-facts schemas/providers/fixtures/tools, and the MCP server exposes only the original nine tools.
+- Current workspace confirmation runs `resolve_places()` and `cluster_places()` synchronously with no ORS matrix, transit connectivity, place facts, weather, access search, or user access/base confirmation. Planning receives only a caller-supplied optional `AccessSelection`.
+- Hierarchical planning hard-codes `selected_areas = reachable_areas[:len(windows)]` and assigns exactly one selected area per day. Inter-area transfer is a Haversine-derived scalar, not a sourced time-dependent transit edge.
+- The planner has access arrival/return buffers and closure rules, but no provider place opening windows, transit segments/transfers, weather risks, TTL validation, or cross-city reachability graph. Current strategy differences are score-weight variants over the same one-area/day heuristic.
+- Place resolution still merges any records with equal `source_label` inside 100 m, exactly the high-risk rule prohibited by the handoff, and compares every evidence pair O(n²) without a spatial candidate index.
+- Area clustering accepts optional walking durations and has stable IDs/no-loss checks, but workspace never supplies them. Its DBSCAN immediately persists noise as singleton/assigned, preventing a later core expansion from absorbing that border point; the handoff's border-order bug remains.
+- The Web still hard-codes `local-web-user`, a fixed thread, `origin="东京"`, `destination="东京"`, and `walking_preference="medium"`; this bypasses Requirement Agent extraction and violates the handoff's first frontend acceptance scenario.
+- Workspace API lacks list, resume, run, handoff, provider-snapshot, clear, restore, and delete endpoints. The only `/resume` endpoint belongs to legacy `/api/workflows`.
+- Conversation events are fully persisted, but API projection truncates to the latest 50 and LLM injection uses only the latest 8. There is no traceable summary or protected unresolved-decision/confirmation memory, matching the documented limitation.
+- Existing LLM RequirementExtractor, strict Reviewer schemas/boundaries, resilient fallbacks, conversation responder, hybrid RAG retrieval, rule proposal/acceptance, and bounded RoleContext builders are reusable components; the main gap is orchestration and workspace-state integration rather than absence of all primitives.
+- RAG rule acceptance can already create active constraints and the hierarchical planner consumes closure-date rules. However knowledge retrieval is API-driven rather than a workspace graph node, the Web lacks the required evidence/rule management surface, and real-time facts are not represented as separate provider snapshots.
+
+## MiriaGo static-format reference
+
+- The explicitly referenced MiriaGo source confirms index work records use Bangumi ID at `[0]`, preferred titles at `[1]/[3]`, city at `[4]`, center at `[9]/[10]`, zoom at `[11]`, and the compressed lite-point array at `[12]`.
+- Lite points are groups of four: point ID, latitude, longitude, and an unused fourth value. Page selection is `work_index // page_size`.
+- Page entries use Bangumi ID at `[0]` and compact detail rows at `[2]`. Detail rows use ID `[0]`, name `[1]`, Chinese name `[2]`, image `[6]`, episode `[8]`, seconds `[9]`, note `[10]`, origin `[11]`, and origin URL `[12]`; coordinates come from the index's ID map.
+- MiriaGo's reader allows only `g.json` or `g<digits>.json`, tries `www.anitabi.cn/d` before `anitabi.cn/d`, and adds an optional version query. The handoff additionally requires persisting/using index `[2]` as the data version and scanning alternate pages on index/page skew.
+
+## Final Phase 19 findings
+
+- A non-empty `checkpoint_ns` on the root compiled graph is not a harmless business namespace:
+  LangGraph treats it as a subgraph path during checkpoint inspection/update. This caused normal
+  resume calls and rebased subject-confirmation checkpoints to diverge. Versioning the hashed
+  root `thread_id` and leaving the root checkpoint namespace empty restores one authoritative
+  checkpoint lineage.
+- After that correction, a confirmed PlanPatch add preserves every previously confirmed subject,
+  confirms the new candidate set, advances the current workspace version, and remains recoverable
+  through the PostgreSQL checkpointer.
+- The final acceptance baseline is 167 Python tests at 81.50% coverage, 15 Web unit tests, and
+  14 serialized desktop/mobile E2E scenarios. `make verify-all` and remediation A-J both pass.
+- Live SearchAPI transit/place evidence is still honestly UNVERIFIED when live smoke is disabled;
+  bounded fixture/provider contracts and deterministic unknown/partial behavior are verified.

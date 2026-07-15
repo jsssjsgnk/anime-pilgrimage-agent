@@ -92,6 +92,7 @@ PHASE_2 = (
             "uv",
             "run",
             "pytest",
+            "tests/contract/test_anitabi_static.py",
             "tests/contract/test_phase2_providers.py",
             "tests/unit",
             "--cov=pilgrimage_agent",
@@ -217,6 +218,8 @@ PHASE_4 = (
             "tests/unit/test_phase4_graph.py",
             "tests/unit/test_phase4_context_review.py",
             "tests/unit/test_phase4_memory.py",
+            "tests/unit/test_workspace_graph.py",
+            "tests/unit/test_workspace_api.py",
         ),
         "fixture",
     ),
@@ -241,6 +244,11 @@ PHASE_4 = (
     Check(
         "Checkpoint resume after API restart",
         ("uv", "run", "python", "scripts/phase4_api_smoke.py"),
+        "integration",
+    ),
+    Check(
+        "Workspace clear and transactional deletion",
+        ("uv", "run", "python", "scripts/workspace_deletion_smoke.py"),
         "integration",
     ),
     Check(

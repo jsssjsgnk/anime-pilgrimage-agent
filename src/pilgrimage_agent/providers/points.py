@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import unicodedata
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Protocol
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -200,9 +199,9 @@ class FallbackPilgrimagePointProvider:
 
 
 def build_route_a(result: PilgrimagePointResult, *, subject_id: str) -> RouteA:
-    """Clean and deduplicate sourced points without deleting unique valid candidates."""
+    """Keep every sourced scene ID while rejecting exact duplicate records."""
 
-    seen: set[tuple[str, float, float]] = set()
+    seen: set[UUID] = set()
     points: list[PilgrimagePoint] = []
     warnings = list(result.warnings)
     original_warning_count = len(warnings)
@@ -213,12 +212,10 @@ def build_route_a(result: PilgrimagePointResult, *, subject_id: str) -> RouteA:
         if point.provenance.source_url is None:
             warnings.append(f"Excluded point {point.id}: missing source URL.")
             continue
-        normalized_name = unicodedata.normalize("NFKC", point.name).casefold().strip()
-        key = (normalized_name, round(point.latitude, 5), round(point.longitude, 5))
-        if key in seen:
+        if point.id in seen:
             warnings.append(f"Removed duplicate point {point.id}.")
             continue
-        seen.add(key)
+        seen.add(point.id)
         points.append(point)
     return RouteA(
         subject_id=subject_id,

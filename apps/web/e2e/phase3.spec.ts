@@ -36,4 +36,14 @@ test("planned map stays compact and opens scene-rich place details", async ({ pa
     ? "phase-3-mobile.png"
     : "phase-3-desktop.png";
   await captureEvidence(page, testInfo, screenshotName);
+
+  if (testInfo.project.name.startsWith("mobile")) {
+    await page.getByRole("button", { name: "对话", exact: true }).click();
+  }
+  await page.getByRole("button", { name: "清空已安排行程" }).click();
+  await expect(page.getByText("地点已经整理好了，现在可以生成每天的行程。")).toBeVisible();
+  await page.getByRole("button", { name: "永久删除工作区" }).click();
+  await expect(page.getByRole("alert")).toContainText("无法撤销");
+  await page.getByRole("button", { name: "再次点击确认永久删除" }).click();
+  await expect(page.getByRole("button", { name: "开始规划" })).toBeVisible();
 });

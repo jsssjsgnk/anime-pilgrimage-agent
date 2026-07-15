@@ -16,7 +16,11 @@ class ProviderRuntimeDiagnostic(BaseModel):
     mode: Literal["live", "fixture", "fallback", "imported", "unverified"]
     configured: bool
     status: Literal["available", "unavailable", "unverified"]
-    fallback_mode: Literal["imported", "haversine"] | None = None
+    fallback_mode: Literal[
+        "imported",
+        "haversine",
+        "detail_then_imported",
+    ] | None = None
 
 
 class Settings(BaseSettings):
@@ -50,6 +54,22 @@ class Settings(BaseSettings):
         default="https://api.anitabi.cn",
         alias="ANITABI_BASE_URL",
         pattern=r"^https://api\.anitabi\.cn/?$",
+    )
+    anitabi_static_base_url: str = Field(
+        default="https://www.anitabi.cn/d",
+        alias="ANITABI_STATIC_BASE_URL",
+        pattern=r"^https://www\.anitabi\.cn/d/?$",
+    )
+    anitabi_static_fallback_url: str = Field(
+        default="https://anitabi.cn/d",
+        alias="ANITABI_STATIC_FALLBACK_URL",
+        pattern=r"^https://anitabi\.cn/d/?$",
+    )
+    anitabi_static_cache_ttl_seconds: int = Field(
+        default=21_600,
+        alias="ANITABI_STATIC_CACHE_TTL_SECONDS",
+        ge=60,
+        le=86_400,
     )
     anitabi_user_agent: str = Field(
         default="anime-pilgrimage-agent/0.1 (read-only; local-development)",
@@ -160,7 +180,7 @@ class Settings(BaseSettings):
                 mode="live",
                 configured=True,
                 status="available",
-                fallback_mode="imported",
+                fallback_mode="detail_then_imported",
             )
         return {**diagnostics, "anitabi": points}
 

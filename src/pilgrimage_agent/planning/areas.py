@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pilgrimage_agent.domain.models import StrictModel
@@ -15,7 +16,7 @@ class AreaClusteringPolicy(StrictModel):
     min_samples: int = 2
     max_internal_walking_minutes: int = 25
     visit_minutes_per_place: int = 30
-    algorithm_version: str = "area-dbscan-v1"
+    algorithm_version: str = "area-dbscan-v2"
 
 
 def _neighbors(
@@ -50,10 +51,9 @@ def _dbscan(
         visited.add(place_id)
         neighbors = neighbor_map[place_id]
         if len(neighbors) < policy.min_samples:
-            clusters.append((place_id,))
-            assigned.add(place_id)
             continue
         members: set[UUID] = {place_id}
+        assigned.add(place_id)
         queue = list(neighbors)
         while queue:
             candidate = queue.pop(0)
@@ -68,7 +68,7 @@ def _dbscan(
                     )
             if candidate not in assigned:
                 members.add(candidate)
-        assigned.update(members)
+                assigned.add(candidate)
         clusters.append(tuple(sorted(members, key=str)))
     all_ids = set(neighbor_map)
     for missing in sorted(all_ids - assigned, key=str):
@@ -152,7 +152,20 @@ def cluster_places(
             for item in member_places
             if item.place_id != medoid.place_id
         ]
-        fallback = walking_durations_seconds is None
+        if walking_durations_seconds is None:
+            travel_time_status: Literal["road", "haversine_fallback", "unverified"] = (
+                "haversine_fallback"
+            )
+        else:
+            has_complete_road_times = all(
+                _road_duration(
+                    walking_durations_seconds, medoid.place_id, item.place_id
+                )
+                is not None
+                for item in member_places
+                if item.place_id != medoid.place_id
+            )
+            travel_time_status = "road" if has_complete_road_times else "unverified"
         area_id = uuid5(
             NAMESPACE_URL, "area:" + ":".join(str(item) for item in sorted(members, key=str))
         )
@@ -182,11 +195,16 @@ def cluster_places(
                     "min_samples": current.min_samples,
                     "max_internal_walking_minutes": current.max_internal_walking_minutes,
                 },
-                confidence=0.75 if fallback else 0.9,
-                travel_time_status="haversine_fallback" if fallback else "road",
+                confidence=0.9 if travel_time_status == "road" else 0.75,
+                travel_time_status=travel_time_status,
                 warnings=(
                     ("ORS walking times unavailable; area uses Haversine fallback.",)
-                    if fallback
+                    if travel_time_status == "haversine_fallback"
+                    else (
+                        "Walking matrix coverage is partial; unverified pairs retain "
+                        "Haversine membership.",
+                    )
+                    if travel_time_status == "unverified"
                     else ()
                 ),
             )

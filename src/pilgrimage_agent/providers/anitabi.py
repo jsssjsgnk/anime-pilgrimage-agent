@@ -47,7 +47,7 @@ class _AnitabiDetailPoint(_AnitabiModel):
     origin_url: HttpUrl | None = Field(default=None, alias="originURL")
 
 
-def _episode_reference(episode: int | str | None, seconds: int | float | None) -> str | None:
+def episode_reference(episode: int | str | None, seconds: int | float | None) -> str | None:
     parts: list[str] = []
     if isinstance(episode, int):
         parts.append(f"第{episode}话")
@@ -69,7 +69,7 @@ def _episode_reference(episode: int | str | None, seconds: int | float | None) -
 class AnitabiProvider:
     """Fetch the complete documented Anitabi point array for one Bangumi subject."""
 
-    provider = "anitabi"
+    provider = "anitabi_detail"
 
     def __init__(
         self,
@@ -171,6 +171,9 @@ class AnitabiProvider:
         return PilgrimagePointResult(
             points=tuple(points),
             is_complete=complete,
+            expected_count=lite.points_length,
+            loaded_count=len(points),
+            data_version=str(lite.modified) if lite.modified is not None else None,
             warnings=tuple(warnings),
             provenance=result_provenance,
         )
@@ -187,14 +190,14 @@ class AnitabiProvider:
             raise ValueError("Anitabi point has no usable name")
         latitude, longitude = item.geo
         source_url = str(item.origin_url) if item.origin_url else subject_map_url
-        episode_reference = _episode_reference(item.ep, item.s)
+        reference = episode_reference(item.ep, item.s)
         return PilgrimagePoint(
             id=uuid5(NAMESPACE_URL, f"anitabi:{subject_id}:{item.id}"),
             subject_id=subject_id,
             name=name,
             latitude=latitude,
             longitude=longitude,
-            episode_refs=(episode_reference,) if episode_reference else (),
+            episode_refs=(reference,) if reference else (),
             image_url=item.image,
             confidence="community",
             source_label=item.origin or "Anitabi",

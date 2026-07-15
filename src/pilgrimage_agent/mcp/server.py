@@ -1,6 +1,6 @@
 """Allowlisted, read-only MCP service entrypoint."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
@@ -12,8 +12,14 @@ from pilgrimage_agent.domain.models import (
     GeoCoordinate,
     MatrixQuery,
     PilgrimagePointQuery,
+    PlaceDetailsQuery,
+    PlaceFactsSearchQuery,
     PlaceSearchQuery,
     SubjectSearchQuery,
+    TransitRoutePreference,
+    TransitRouteQuery,
+    TransitTimeMode,
+    TransitVehiclePreference,
     TravelProfile,
     WeatherForecastQuery,
 )
@@ -163,6 +169,78 @@ async def search_flexible_flight_dates(
             return_start=return_start,
             return_end=return_end,
             currency=currency,
+        )
+    )
+    return result.model_dump(mode="json")
+
+
+@mcp.tool()
+async def search_transit_options(
+    origin: str,
+    destination: str,
+    time_mode: TransitTimeMode = "depart_at",
+    at: datetime | None = None,
+    route: TransitRoutePreference = "best",
+    prefer: list[TransitVehiclePreference] | None = None,
+    language: str = "ja",
+    country: str = "jp",
+) -> dict[str, object]:
+    """Search a single public-transport edge; no booking or waypoint composition."""
+
+    result = await get_provider_services().searchapi.transit(
+        TransitRouteQuery(
+            origin=origin,
+            destination=destination,
+            time_mode=time_mode,
+            at=at,
+            route=route,
+            prefer=tuple(prefer or ()),
+            language=language,
+            country=country,
+        )
+    )
+    return result.model_dump(mode="json")
+
+
+@mcp.tool()
+async def search_place_facts(
+    query: str,
+    coordinate_hint: GeoCoordinate | None = None,
+    zoom: int = 15,
+    language: str = "ja",
+    country: str = "jp",
+    limit: int = 5,
+) -> dict[str, object]:
+    """Search place candidates and preserve match confidence for later confirmation."""
+
+    result = await get_provider_services().searchapi.search_places(
+        PlaceFactsSearchQuery(
+            query=query,
+            coordinate_hint=coordinate_hint,
+            zoom=zoom,
+            language=language,
+            country=country,
+            limit=limit,
+        )
+    )
+    return result.model_dump(mode="json")
+
+
+@mcp.tool()
+async def get_place_facts(
+    place_id: str | None = None,
+    data_id: str | None = None,
+    language: str = "ja",
+    country: str = "jp",
+) -> dict[str, object]:
+    """Fetch current details for one previously selected provider place identifier."""
+
+    result = await get_provider_services().searchapi.place_details(
+        PlaceDetailsQuery(
+            place_id=place_id,
+            data_id=data_id,
+            language=language,
+            country=country,
         )
     )
     return result.model_dump(mode="json")

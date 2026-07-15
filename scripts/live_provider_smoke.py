@@ -40,15 +40,24 @@ async def main_async() -> int:
         failures.append("Anitabi")
         print(f"FAIL Anitabi: {error.kind.value} ({error.safe_message})")
     else:
-        if anitabi.provenance.provider != "anitabi" or not anitabi.points:
+        if anitabi.provenance.provider != "anitabi_static" or not anitabi.points:
             failures.append("Anitabi")
-            print("FAIL Anitabi: live response was empty or used the import fallback")
-        elif not anitabi.is_complete and not anitabi.warnings:
+            print("FAIL Anitabi: live response was empty or missed the static source")
+        elif (
+            not anitabi.is_complete
+            or anitabi.loaded_count != anitabi.expected_count
+            or anitabi.loaded_count < 400
+        ):
             failures.append("Anitabi")
-            print("FAIL Anitabi: partial data lacked an explicit warning")
+            print(
+                "FAIL Anitabi: static collection was incomplete "
+                f"({anitabi.loaded_count}/{anitabi.expected_count})"
+            )
         else:
-            scope = "complete" if anitabi.is_complete else "explicitly partial"
-            print(f"PASS Anitabi: {len(anitabi.points)} {scope} sourced points")
+            print(
+                "PASS Anitabi: "
+                f"{anitabi.loaded_count}/{anitabi.expected_count} complete static points"
+            )
 
     checks = [
         (
@@ -114,6 +123,10 @@ async def main_async() -> int:
         else 0
     )
     print(f"SearchAPI live request count: {searchapi_count}")
+    print(
+        "UNVERIFIED SearchAPI transit/place live endpoints: fixture contracts passed, "
+        "but this bounded smoke intentionally spends at most one SearchAPI request."
+    )
     return 1 if failures else 0
 
 

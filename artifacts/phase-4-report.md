@@ -1,6 +1,6 @@
 # Phase 4 verification
 
-Generated: 2026-07-14T18:21:07.546654+00:00
+Generated: 2026-07-15T07:54:13.200264+00:00
 
 ## Summary
 
@@ -17,6 +17,7 @@ Generated: 2026-07-14T18:21:07.546654+00:00
 | Four-service health | compose | PASS |
 | Five PostgreSQL project stores | integration | PASS |
 | Checkpoint resume after API restart | integration | PASS |
+| Workspace clear and transactional deletion | integration | PASS |
 | One real structured-output LLM smoke | live | PASS |
 | Desktop/mobile browser regression | e2e | PASS |
 

@@ -1,17 +1,28 @@
 """Hierarchical planning produces explainable independent strategy versions."""
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from uuid import NAMESPACE_URL, uuid4, uuid5
+from zoneinfo import ZoneInfo
 
 from pilgrimage_agent.domain.models import (
     DataProvenance,
     DataStatus,
     GeoCoordinate,
+    OpeningWindow,
+    PlaceFact,
     SubjectIntent,
     TripRequest,
+    WeatherForecastResult,
+    WeatherWindow,
 )
-from pilgrimage_agent.domain.planning import BaseCandidate
+from pilgrimage_agent.domain.planning import (
+    AccessMode,
+    AccessOption,
+    AccessSelection,
+    BaseCandidate,
+)
 from pilgrimage_agent.domain.workspace import (
+    AreaTransitEdge,
     DerivedKnowledgeRule,
     EntityRef,
     PlanningStrategy,
@@ -30,6 +41,17 @@ def _provenance() -> DataProvenance:
         provider="fixture",
         fetched_at=datetime.now(UTC),
         status=DataStatus.ESTIMATED,
+    )
+
+
+def _live_provenance() -> DataProvenance:
+    now = datetime.now(UTC)
+    return DataProvenance(
+        provider="fixture-live",
+        source_url="https://example.org/facts",
+        fetched_at=now,
+        expires_at=now + timedelta(hours=6),
+        status=DataStatus.LIVE,
     )
 
 
@@ -240,3 +262,183 @@ def test_accepted_closure_rule_becomes_a_visible_visit_window_omission() -> None
     for itinerary in result.itineraries:
         omissions = {item.place_id: item.reason_code for item in itinerary.omissions}
         assert omissions[blocked.place_id] == "visit_window"
+
+
+def test_one_day_can_combine_multiple_transit_connected_areas() -> None:
+    request = _request()
+    start = request.requirements.start_date
+    assert start is not None
+    one_day = request.model_copy(
+        update={
+            "requirements": request.requirements.model_copy(update={"end_date": start}),
+            "area_transit_edges": (
+                AreaTransitEdge(
+                    source_area_id=request.areas[0].area_id,
+                    target_area_id=request.areas[1].area_id,
+                    duration_seconds=600,
+                    walking_seconds=120,
+                    transfers=0,
+                    option_id="fixture-area-edge",
+                    provenance=_live_provenance(),
+                ),
+            ),
+        }
+    )
+
+    result = plan_hierarchical_itineraries(one_day)
+
+    for itinerary in result.itineraries:
+        assert len(itinerary.days) == 1
+        assert len(itinerary.days[0].area_ids) == 2
+        assert any(
+            visit.incoming_duration_seconds == 600
+            for visit in itinerary.days[0].visits
+        )
+
+
+def test_current_temporary_closure_is_never_scheduled() -> None:
+    request = _request()
+    blocked = request.places[0]
+    fact = PlaceFact(
+        place_id="fixture-place-id",
+        name=blocked.canonical_name,
+        coordinate=blocked.coordinate,
+        temporarily_closed=True,
+        match_confidence=1,
+        provenance=_live_provenance(),
+    )
+
+    result = plan_hierarchical_itineraries(
+        request.model_copy(update={"place_facts": {blocked.place_id: fact}})
+    )
+
+    for itinerary in result.itineraries:
+        assert blocked.place_id not in {
+            visit.place_id for day in itinerary.days for visit in day.visits
+        }
+        assert {item.place_id: item.reason_code for item in itinerary.omissions}[
+            blocked.place_id
+        ] == "visit_window"
+
+
+def test_opening_window_that_cannot_fit_a_visit_is_omitted() -> None:
+    request = _request()
+    blocked = request.places[0]
+    start = request.requirements.start_date
+    assert start is not None
+    fact = PlaceFact(
+        place_id="fixture-hours-id",
+        name=blocked.canonical_name,
+        coordinate=blocked.coordinate,
+        opening_windows=(
+            OpeningWindow(
+                weekday=start.weekday(),
+                opens_at=time(17, 50),
+                closes_at=time(18),
+                raw_text="5:50 PM-6:00 PM",
+            ),
+        ),
+        temporarily_closed=False,
+        match_confidence=1,
+        provenance=_live_provenance(),
+    )
+
+    result = plan_hierarchical_itineraries(
+        request.model_copy(
+            update={
+                "requirements": request.requirements.model_copy(
+                    update={"end_date": start}
+                ),
+                "place_facts": {blocked.place_id: fact},
+            }
+        )
+    )
+
+    assert all(
+        {item.place_id: item.reason_code for item in itinerary.omissions}[
+            blocked.place_id
+        ]
+        == "visit_window"
+        for itinerary in result.itineraries
+    )
+
+
+def test_rain_reorders_indoor_place_before_outdoor_place() -> None:
+    request = _request(places=_fixture()[1][:2])
+    start = request.requirements.start_date
+    assert start is not None
+    outdoor = request.places[0].model_copy(update={"place_type": "viewpoint"})
+    indoor = request.places[1].model_copy(update={"place_type": "facility"})
+    areas = cluster_places(
+        (outdoor, indoor),
+        policy=AreaClusteringPolicy(eps_meters=500, min_samples=2),
+    )
+    forecast = WeatherForecastResult(
+        windows=(
+            WeatherWindow(
+                date=start,
+                temperature_max_c=25,
+                temperature_min_c=18,
+                precipitation_probability_max=70,
+                weather_code=61,
+            ),
+        ),
+        available=True,
+        provenance=_live_provenance(),
+    )
+    rainy_request = request.model_copy(
+        update={
+            "places": (outdoor, indoor),
+            "areas": areas,
+            "requirements": request.requirements.model_copy(update={"end_date": start}),
+            "weather_forecast": forecast,
+        }
+    )
+
+    result = plan_hierarchical_itineraries(rainy_request)
+
+    assert all(
+        itinerary.days[0].visits[0].place_id == indoor.place_id
+        for itinerary in result.itineraries
+    )
+
+
+def test_late_inbound_access_leaves_the_arrival_day_empty() -> None:
+    request = _request()
+    start = request.requirements.start_date
+    assert start is not None
+    timezone = ZoneInfo(request.timezone)
+    inbound_departure = datetime.combine(start, datetime.min.time(), timezone).replace(
+        hour=16
+    )
+    outbound_departure = inbound_departure.replace(hour=20)
+    access = AccessSelection(
+        inbound=AccessOption(
+            option_id="late-inbound",
+            mode=AccessMode.TRAIN,
+            origin="Kyoto",
+            destination="Tokyo",
+            departure_at=inbound_departure,
+            arrival_at=inbound_departure + timedelta(minutes=90),
+            provenance=_live_provenance(),
+        ),
+        outbound=AccessOption(
+            option_id="evening-outbound",
+            mode=AccessMode.TRAIN,
+            origin="Tokyo",
+            destination="Kyoto",
+            departure_at=outbound_departure,
+            arrival_at=outbound_departure + timedelta(minutes=90),
+            provenance=_live_provenance(),
+        ),
+    )
+    one_day = request.model_copy(
+        update={
+            "requirements": request.requirements.model_copy(update={"end_date": start}),
+            "access": access,
+        }
+    )
+
+    result = plan_hierarchical_itineraries(one_day)
+
+    assert all(not itinerary.days[0].visits for itinerary in result.itineraries)

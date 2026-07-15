@@ -10,15 +10,23 @@ from zoneinfo import ZoneInfo
 
 from pydantic import Field, model_validator
 
-from pilgrimage_agent.domain.models import StrictModel, SubjectIntent, TripRequest
+from pilgrimage_agent.domain.models import (
+    PlaceFact,
+    StrictModel,
+    SubjectIntent,
+    TripRequest,
+    WeatherForecastResult,
+)
 from pilgrimage_agent.domain.planning import AccessSelection, BaseCandidate, ValidationIssue
 from pilgrimage_agent.domain.workspace import (
     AreaCluster,
+    AreaTransitEdge,
     CandidateDecision,
     CandidateEdge,
     DerivedKnowledgeRule,
     ItineraryDay,
     ItineraryVersion,
+    PlaceWalkingEdge,
     PlanningStrategy,
     ScheduledPlace,
     ScoreComponent,
@@ -29,7 +37,7 @@ from pilgrimage_agent.domain.workspace import (
 )
 from pilgrimage_agent.planning.geo import haversine_meters
 
-PLANNER_VERSION = "hierarchical-planner-v1"
+PLANNER_VERSION = "hierarchical-planner-v2"
 
 
 class HierarchicalPlanningRequest(StrictModel):
@@ -49,6 +57,10 @@ class HierarchicalPlanningRequest(StrictModel):
     fixed_day_assignments: dict[UUID, int] = Field(default_factory=dict)
     fixed_positions: dict[UUID, int] = Field(default_factory=dict)
     knowledge_rules: tuple[DerivedKnowledgeRule, ...] = ()
+    walking_edges: tuple[PlaceWalkingEdge, ...] = ()
+    area_transit_edges: tuple[AreaTransitEdge, ...] = ()
+    place_facts: dict[UUID, PlaceFact] = Field(default_factory=dict)
+    weather_forecast: WeatherForecastResult | None = None
 
     @model_validator(mode="after")
     def references_and_dates_are_valid(self) -> HierarchicalPlanningRequest:
@@ -75,6 +87,19 @@ class HierarchicalPlanningRequest(StrictModel):
             raise ValueError("fixed position is outside the supported range")
         if len(self.strategies) != len(set(self.strategies)):
             raise ValueError("planning strategies must be unique")
+        if any(
+            edge.source_place_id not in place_ids or edge.target_place_id not in place_ids
+            for edge in self.walking_edges
+        ):
+            raise ValueError("walking edges must reference candidate places")
+        area_ids = {item.area_id for item in self.areas}
+        if any(
+            edge.source_area_id not in area_ids or edge.target_area_id not in area_ids
+            for edge in self.area_transit_edges
+        ):
+            raise ValueError("transit edges must reference candidate areas")
+        if not set(self.place_facts).issubset(place_ids):
+            raise ValueError("place facts must reference candidate places")
         ZoneInfo(self.timezone)
         return self
 
@@ -198,6 +223,26 @@ def _candidate_graph(request: HierarchicalPlanningRequest) -> TripCandidateGraph
                     target_id=str(place_id),
                 )
             )
+    for walking_edge_item in request.walking_edges:
+        edges.append(
+            CandidateEdge(
+                source_type="place",
+                source_id=str(walking_edge_item.source_place_id),
+                relation="reachable",
+                target_type="place",
+                target_id=str(walking_edge_item.target_place_id),
+            )
+        )
+    for area_edge_item in request.area_transit_edges:
+        edges.append(
+            CandidateEdge(
+                source_type="area",
+                source_id=str(area_edge_item.source_area_id),
+                relation="reachable",
+                target_type="area",
+                target_id=str(area_edge_item.target_area_id),
+            )
+        )
     decisions = tuple(
         CandidateDecision(
             entity_type="place",
@@ -355,6 +400,112 @@ def _closed_by_rule(
     return False
 
 
+def _area_transit_edge(
+    request: HierarchicalPlanningRequest, first: UUID, second: UUID
+) -> AreaTransitEdge | None:
+    return next(
+        (
+            edge
+            for edge in request.area_transit_edges
+            if {edge.source_area_id, edge.target_area_id} == {first, second}
+        ),
+        None,
+    )
+
+
+def _area_transfer_seconds(
+    request: HierarchicalPlanningRequest,
+    first: AreaCluster | None,
+    second: AreaCluster,
+) -> float:
+    if first is None:
+        distance = haversine_meters(
+            request.base.coordinate, second.representative_coordinate
+        )
+        return max(15 * 60, distance / 13.9)
+    edge = _area_transit_edge(request, first.area_id, second.area_id)
+    if edge is not None:
+        return float(edge.duration_seconds)
+    distance = haversine_meters(
+        first.representative_coordinate, second.representative_coordinate
+    )
+    return max(15 * 60, distance / 13.9)
+
+
+def _walking_edge(
+    request: HierarchicalPlanningRequest, first: UUID, second: UUID
+) -> PlaceWalkingEdge | None:
+    return next(
+        (
+            edge
+            for edge in request.walking_edges
+            if edge.source_place_id == first and edge.target_place_id == second
+        ),
+        None,
+    )
+
+
+def _fit_opening_window(
+    request: HierarchicalPlanningRequest,
+    place_id: UUID,
+    proposed_start: datetime,
+) -> tuple[datetime, datetime] | None:
+    fact = request.place_facts.get(place_id)
+    visit_duration = timedelta(minutes=request.visit_minutes)
+    if fact is None or fact.match_confidence < 0.85:
+        return proposed_start, proposed_start + visit_duration
+    if fact.temporarily_closed is True:
+        return None
+    windows = tuple(
+        item for item in fact.opening_windows if item.weekday == proposed_start.weekday()
+    )
+    if not windows:
+        return proposed_start, proposed_start + visit_duration
+    normalized = tuple(
+        item for item in windows if item.opens_at is not None and item.closes_at is not None
+    )
+    if not normalized:
+        if any(
+            item.raw_text is not None
+            and item.raw_text.strip().casefold() in {"closed", "休業", "定休日"}
+            for item in windows
+        ):
+            return None
+        return proposed_start, proposed_start + visit_duration
+    for window in sorted(normalized, key=lambda item: item.opens_at or time.min):
+        assert window.opens_at is not None and window.closes_at is not None
+        opens = datetime.combine(proposed_start.date(), window.opens_at, proposed_start.tzinfo)
+        closes = datetime.combine(
+            proposed_start.date(), window.closes_at, proposed_start.tzinfo
+        )
+        if closes <= opens:
+            closes += timedelta(days=1)
+        visit_start = max(proposed_start, opens)
+        visit_end = visit_start + visit_duration
+        if visit_end <= closes:
+            return visit_start, visit_end
+    return None
+
+
+def _weather_risk(
+    request: HierarchicalPlanningRequest, day: date
+) -> tuple[bool, bool]:
+    if request.weather_forecast is None or not request.weather_forecast.available:
+        return False, False
+    window = next(
+        (item for item in request.weather_forecast.windows if item.date == day), None
+    )
+    if window is None:
+        return False, False
+    rain = (window.precipitation_probability_max or 0) >= 60
+    hard = (
+        (window.precipitation_probability_max or 0) >= 90
+        or (window.temperature_max_c is not None and window.temperature_max_c >= 38)
+        or (window.temperature_min_c is not None and window.temperature_min_c <= -5)
+    )
+    return rain, hard
+
+
 def _plan_strategy(
     request: HierarchicalPlanningRequest,
     graph: TripCandidateGraph,
@@ -397,16 +548,45 @@ def _plan_strategy(
                 )
             continue
         reachable_areas.append(area)
-    selected_areas = reachable_areas[: len(windows)]
-    for day_index, area in enumerate(selected_areas):
-        assignments[day_index].append(area)
-    for area in reachable_areas[len(windows) :]:
-        for place_id in area.place_ids:
-            omissions[place_id] = StructuredOmission(
-                place_id=place_id,
-                reason_code="lower_strategy_score",
-                detail="A higher-scoring reachable area was selected for the available day.",
+    allocated_seconds = [0.0 for _window in windows]
+    for area in reachable_areas:
+        fixed_days = sorted(
+            {
+                request.fixed_day_assignments[place_id] - 1
+                for place_id in area.place_ids
+                if place_id in request.fixed_day_assignments
+            }
+        )
+        candidate_days = fixed_days or list(range(len(windows)))
+        choices: list[tuple[float, int, float]] = []
+        for day_index in candidate_days:
+            previous = assignments[day_index][-1] if assignments[day_index] else None
+            transfer = _area_transfer_seconds(request, previous, area)
+            available = (
+                windows[day_index][1] - windows[day_index][0]
+            ).total_seconds() - allocated_seconds[day_index]
+            minimum_useful = request.visit_minutes * 60 + transfer
+            if available + 0.01 < minimum_useful:
+                continue
+            strategy_penalty = (
+                transfer * 2 if strategy is PlanningStrategy.LOW_WALKING else transfer
             )
+            choices.append(
+                (allocated_seconds[day_index] + strategy_penalty, day_index, transfer)
+            )
+        if not choices:
+            for place_id in area.place_ids:
+                omissions[place_id] = StructuredOmission(
+                    place_id=place_id,
+                    reason_code="time_limit",
+                    detail="No confirmed day has enough time for this additional area.",
+                )
+            continue
+        _score, selected_day, transfer = min(choices)
+        assignments[selected_day].append(area)
+        allocated_seconds[selected_day] += (
+            transfer + area.estimated_visit_minutes * 60
+        )
 
     days: list[ItineraryDay] = []
     walking_limit = _walking_limit(request.requirements)
@@ -452,6 +632,19 @@ def _plan_strategy(
             if selected is not None:
                 ordered_list.remove(selected)
                 ordered_list.insert(min(position, len(ordered_list)), selected)
+        rain_risk, hard_weather_risk = _weather_risk(
+            request, window_start.date()
+        )
+        if rain_risk:
+            original_position = {
+                item.place_id: index for index, item in enumerate(ordered_list)
+            }
+            ordered_list.sort(
+                key=lambda item: (
+                    item.place_type != "facility",
+                    original_position[item.place_id],
+                )
+            )
         ordered = tuple(ordered_list)
         visits: list[ScheduledPlace] = []
         local_origin = (
@@ -459,12 +652,15 @@ def _plan_strategy(
             if day_areas
             else request.base.coordinate
         )
+        origin_area = day_areas[0] if day_areas else None
         transfer_distance = haversine_meters(request.base.coordinate, local_origin)
         transfer_seconds = max(15 * 60, transfer_distance / 13.9) if day_areas else 0.0
         current_coordinate = local_origin
         current_time = window_start + timedelta(seconds=transfer_seconds)
         effective_window_end = window_end - timedelta(seconds=transfer_seconds)
         walked = 0.0
+        current_place_id: UUID | None = None
+        current_area = origin_area
         for place in ordered:
             if _closed_by_rule(place.place_id, window_start.date(), request.knowledge_rules):
                 omissions[place.place_id] = StructuredOmission(
@@ -473,8 +669,62 @@ def _plan_strategy(
                     detail="An accepted high-authority closure rule blocks this visit date.",
                 )
                 continue
-            incoming = haversine_meters(current_coordinate, place.coordinate)
-            return_distance = haversine_meters(place.coordinate, local_origin)
+            if hard_weather_risk and place.place_type != "facility":
+                omissions[place.place_id] = StructuredOmission(
+                    place_id=place.place_id,
+                    reason_code="unverified",
+                    detail=(
+                        "The current forecast has an extreme outdoor risk; refresh or "
+                        "confirm before scheduling this place."
+                    ),
+                )
+                continue
+            target_area = next(
+                area for area in request.areas if place.place_id in area.place_ids
+            )
+            if current_place_id is not None and current_area == target_area:
+                road_edge = _walking_edge(request, current_place_id, place.place_id)
+            else:
+                road_edge = None
+            if road_edge is not None:
+                incoming = road_edge.distance_meters
+                duration_seconds = road_edge.duration_seconds
+            elif current_place_id is not None and current_area != target_area:
+                transit_edge = (
+                    _area_transit_edge(request, current_area.area_id, target_area.area_id)
+                    if current_area is not None
+                    else None
+                )
+                if transit_edge is not None:
+                    incoming = transit_edge.walking_seconds * 1.25
+                    duration_seconds = float(transit_edge.duration_seconds)
+                else:
+                    area_distance = haversine_meters(
+                        current_area.representative_coordinate,
+                        target_area.representative_coordinate,
+                    ) if current_area is not None else 0.0
+                    incoming = 0.0
+                    duration_seconds = max(15 * 60, area_distance / 13.9)
+            else:
+                incoming = haversine_meters(current_coordinate, place.coordinate)
+                duration_seconds = incoming / 1.25
+            if origin_area is not None and target_area.area_id != origin_area.area_id:
+                return_edge = _area_transit_edge(
+                    request, target_area.area_id, origin_area.area_id
+                )
+                if return_edge is not None:
+                    return_distance = return_edge.walking_seconds * 1.25
+                    return_duration = float(return_edge.duration_seconds)
+                else:
+                    area_distance = haversine_meters(
+                        target_area.representative_coordinate,
+                        origin_area.representative_coordinate,
+                    )
+                    return_distance = 0.0
+                    return_duration = max(15 * 60, area_distance / 13.9)
+            else:
+                return_distance = haversine_meters(place.coordinate, local_origin)
+                return_duration = return_distance / 1.25
             projected = walked + incoming + return_distance
             if projected > walking_limit:
                 omissions[place.place_id] = StructuredOmission(
@@ -483,10 +733,20 @@ def _plan_strategy(
                     detail="Scheduling this place would exceed the daily walking limit.",
                 )
                 continue
-            duration_seconds = incoming / 1.25
-            visit_start = current_time + timedelta(seconds=duration_seconds)
-            visit_end = visit_start + timedelta(minutes=request.visit_minutes)
-            if visit_end + timedelta(seconds=return_distance / 1.25) > effective_window_end:
+            visit_window = _fit_opening_window(
+                request,
+                place.place_id,
+                current_time + timedelta(seconds=duration_seconds),
+            )
+            if visit_window is None:
+                omissions[place.place_id] = StructuredOmission(
+                    place_id=place.place_id,
+                    reason_code="visit_window",
+                    detail="Current place facts do not provide an open visit window.",
+                )
+                continue
+            visit_start, visit_end = visit_window
+            if visit_end + timedelta(seconds=return_duration) > effective_window_end:
                 omissions[place.place_id] = StructuredOmission(
                     place_id=place.place_id,
                     reason_code="time_limit",
@@ -512,8 +772,28 @@ def _plan_strategy(
             current_coordinate = place.coordinate
             current_time = visit_end
             walked += incoming
-        return_distance = haversine_meters(current_coordinate, local_origin)
-        total_walk = walked + (return_distance if visits else 0)
+            current_place_id = place.place_id
+            current_area = target_area
+        if visits and current_area is not None and origin_area is not None:
+            if current_area.area_id == origin_area.area_id:
+                return_distance = haversine_meters(current_coordinate, local_origin)
+                return_duration = return_distance / 1.25
+            else:
+                return_edge = _area_transit_edge(
+                    request, current_area.area_id, origin_area.area_id
+                )
+                if return_edge is not None:
+                    return_distance = return_edge.walking_seconds * 1.25
+                    return_duration = float(return_edge.duration_seconds)
+                else:
+                    return_distance = 0.0
+                    return_duration = _area_transfer_seconds(
+                        request, current_area, origin_area
+                    )
+        else:
+            return_distance = 0.0
+            return_duration = 0.0
+        total_walk = walked + return_distance
         days.append(
             ItineraryDay(
                 date=window_start.date(),
@@ -525,7 +805,7 @@ def _plan_strategy(
                     round(
                         (
                             (current_time - window_start).total_seconds()
-                            + return_distance / 1.25
+                            + return_duration
                             + transfer_seconds
                         )
                         / 60
@@ -596,6 +876,72 @@ def _plan_strategy(
                     code="walking_limit",
                     detail="Daily walking exceeds the configured limit.",
                     day=day.date,
+                )
+            )
+        for previous_visit, current_visit in pairwise(day.visits):
+            if current_visit.start_at < previous_visit.end_at:
+                issues.append(
+                    ValidationIssue(
+                        code="visit_overlap",
+                        detail="Scheduled visits overlap or move backward in time.",
+                        day=day.date,
+                    )
+                )
+        for visit in day.visits:
+            if visit.place_id in request.excluded_place_ids:
+                issues.append(
+                    ValidationIssue(
+                        code="excluded_place_scheduled",
+                        detail="An explicitly excluded place was scheduled.",
+                        point_id=visit.place_id,
+                        day=day.date,
+                    )
+                )
+    if request.access is not None and days:
+        first_visits = days[0].visits
+        last_visits = days[-1].visits
+        timezone = ZoneInfo(request.timezone)
+        if first_visits and first_visits[0].start_at < (
+            request.access.inbound.arrival_at.astimezone(timezone)
+            + timedelta(minutes=90)
+        ):
+            issues.append(
+                ValidationIssue(
+                    code="inbound_buffer",
+                    detail="The first visit violates the configured arrival buffer.",
+                    day=days[0].date,
+                )
+            )
+        if last_visits and last_visits[-1].end_at > (
+            request.access.outbound.departure_at.astimezone(timezone)
+            - timedelta(minutes=120)
+        ):
+            issues.append(
+                ValidationIssue(
+                    code="outbound_buffer",
+                    detail="The last visit violates the configured departure buffer.",
+                    day=days[-1].date,
+                )
+            )
+    now = datetime.now(ZoneInfo(request.timezone))
+    for place_id in scheduled_ids:
+        fact = request.place_facts.get(place_id)
+        if fact is None:
+            continue
+        if fact.provenance.source_url is None or fact.provenance.expires_at is None:
+            issues.append(
+                ValidationIssue(
+                    code="provider_fact_provenance",
+                    detail="A scheduled place fact lacks a source or refresh deadline.",
+                    point_id=place_id,
+                )
+            )
+        elif fact.provenance.expires_at <= now:
+            issues.append(
+                ValidationIssue(
+                    code="stale_provider_fact",
+                    detail="A scheduled place fact is stale and must be refreshed.",
+                    point_id=place_id,
                 )
             )
     score_components = tuple(

@@ -61,6 +61,7 @@ def test_uppercase_provider_mode_selects_live_runtime(monkeypatch: MonkeyPatch) 
     assert diagnostics["ors"].mode == "fallback"
     assert diagnostics["ors"].fallback_mode == "haversine"
     assert diagnostics["anitabi"].mode == "live"
+    assert diagnostics["anitabi"].fallback_mode == "detail_then_imported"
 
 
 def test_runtime_diagnostics_expose_no_configuration_values() -> None:

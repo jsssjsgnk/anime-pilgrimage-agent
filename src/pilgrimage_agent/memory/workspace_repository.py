@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -133,9 +134,7 @@ class SqlWorkspaceRepository:
                                 PlaceSubjectAppearanceRecord.place_id,
                                 PlaceSubjectAppearanceRecord.subject_id,
                             ],
-                            set_={
-                                "evidence_ids": appearance_statement.excluded.evidence_ids
-                            },
+                            set_={"evidence_ids": appearance_statement.excluded.evidence_ids},
                         )
                     )
             graph_version = (
@@ -143,6 +142,18 @@ class SqlWorkspaceRepository:
                 if state.candidate_graph is not None
                 else state.state_version
             )
+            itinerary_by_id = {
+                item.itinerary_id: item
+                for item in (*state.archived_itineraries, *state.itineraries)
+            }
+            itinerary_delete = delete(ItineraryVersionRecord).where(
+                ItineraryVersionRecord.trip_id == state.trip_id
+            )
+            if itinerary_by_id:
+                itinerary_delete = itinerary_delete.where(
+                    ItineraryVersionRecord.id.not_in(tuple(itinerary_by_id))
+                )
+            await session.execute(itinerary_delete)
             for area in state.areas:
                 statement = insert(AreaClusterRecord).values(
                     id=area.area_id,
@@ -186,7 +197,7 @@ class SqlWorkspaceRepository:
                         },
                     )
                 )
-                for itinerary in state.itineraries:
+                for itinerary in itinerary_by_id.values():
                     itinerary_statement = insert(ItineraryVersionRecord).values(
                         id=itinerary.itinerary_id,
                         trip_id=state.trip_id,

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 
 from pilgrimage_agent.config import Settings, get_settings
 from pilgrimage_agent.providers.anitabi import AnitabiProvider, FixtureAnitabiProvider
+from pilgrimage_agent.providers.anitabi_static import (
+    AnitabiStaticAdapter,
+    StaticThenDetailAnitabiProvider,
+)
 from pilgrimage_agent.providers.bangumi import (
     BangumiSubjectProvider,
     FixtureBangumiSubjectProvider,
@@ -43,6 +48,7 @@ class ProviderServices:
         self.ors: FixtureOpenRouteServiceProvider | OpenRouteServiceProvider
         self.weather: FixtureOpenMeteoProvider | OpenMeteoProvider
         self.flights: FixtureSearchApiFlightProvider | SearchApiFlightProvider
+        self.searchapi: FixtureSearchApiFlightProvider | SearchApiFlightProvider
         import_path = settings.pilgrimage_points_import_path
         if not import_path.is_absolute():
             import_path = ROOT / import_path
@@ -55,12 +61,23 @@ class ProviderServices:
                 provider="anitabi",
                 timeout_seconds=settings.provider_timeout_seconds,
                 max_attempts=settings.provider_max_attempts,
+                max_response_bytes=64 * 1024 * 1024,
             )
             self.points = FallbackPilgrimagePointProvider(
-                AnitabiProvider(
-                    http=anitabi_http,
-                    base_url=settings.anitabi_base_url,
-                    user_agent=settings.anitabi_user_agent,
+                StaticThenDetailAnitabiProvider(
+                    AnitabiStaticAdapter(
+                        http=anitabi_http,
+                        base_url=settings.anitabi_static_base_url,
+                        fallback_url=settings.anitabi_static_fallback_url,
+                        cache_ttl=timedelta(
+                            seconds=settings.anitabi_static_cache_ttl_seconds
+                        ),
+                    ),
+                    AnitabiProvider(
+                        http=anitabi_http,
+                        base_url=settings.anitabi_base_url,
+                        user_agent=settings.anitabi_user_agent,
+                    ),
                 ),
                 ImportedPilgrimagePointProvider(import_path),
             )
@@ -86,7 +103,8 @@ class ProviderServices:
         if settings.provider_mode == "fixture":
             self.ors = FixtureOpenRouteServiceProvider()
             self.weather = FixtureOpenMeteoProvider()
-            self.flights = FixtureSearchApiFlightProvider()
+            self.searchapi = FixtureSearchApiFlightProvider()
+            self.flights = self.searchapi
             return
 
         ors_http = SafeHttpClient(
@@ -109,7 +127,7 @@ class ProviderServices:
             http=ors_http,
         )
         self.weather = OpenMeteoProvider(http=weather_http)
-        self.flights = SearchApiFlightProvider(
+        self.searchapi = SearchApiFlightProvider(
             api_key=(
                 settings.searchapi_api_key.get_secret_value()
                 if settings.searchapi_api_key
@@ -117,6 +135,7 @@ class ProviderServices:
             ),
             http=searchapi_http,
         )
+        self.flights = self.searchapi
 
 
 @lru_cache

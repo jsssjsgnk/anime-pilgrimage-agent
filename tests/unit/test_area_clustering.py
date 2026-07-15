@@ -42,7 +42,7 @@ def test_dbscan_is_stable_and_keeps_isolated_singletons() -> None:
     assert {area.area_id for area in forward} == {area.area_id for area in reverse}
     assert any(area.place_ids == (isolated.place_id,) for area in forward)
     assert all(area.algorithm == "haversine_dbscan" for area in forward)
-    assert all(area.algorithm_version == "area-dbscan-v1" for area in forward)
+    assert all(area.algorithm_version == "area-dbscan-v2" for area in forward)
     assert all(area.travel_time_status == "haversine_fallback" for area in forward)
     assert all(area.warnings for area in forward)
 
@@ -76,6 +76,22 @@ def test_road_time_correction_splits_barrier_outlier_without_loss() -> None:
     assert all(area.travel_time_status == "road" for area in areas)
 
 
+def test_partial_walking_matrix_keeps_a_tuple_warning() -> None:
+    first = _place("partial-first", 35.6600, 139.6680)
+    second = _place("partial-second", 35.6610, 139.6690)
+
+    areas = cluster_places(
+        (first, second),
+        walking_durations_seconds={},
+    )
+
+    assert len(areas) == 1
+    assert areas[0].travel_time_status == "unverified"
+    assert areas[0].warnings == (
+        "Walking matrix coverage is partial; unverified pairs retain Haversine membership.",
+    )
+
+
 def test_empty_and_invalid_inputs_are_explicit() -> None:
     assert cluster_places(()) == ()
     duplicate = _place("duplicate", 35.0, 139.0)
@@ -85,3 +101,23 @@ def test_empty_and_invalid_inputs_are_explicit() -> None:
         assert "unique" in str(error)
     else:  # pragma: no cover - invariant regression guard
         raise AssertionError("duplicate place IDs must fail")
+
+
+def test_earlier_noise_becomes_a_border_member_of_a_later_core_cluster() -> None:
+    border_left = _place("border-left", 35.6600, 139.6680).model_copy(
+        update={"place_id": UUID(int=1)}
+    )
+    core = _place("core", 35.6607, 139.6680).model_copy(
+        update={"place_id": UUID(int=2)}
+    )
+    border_right = _place("border-right", 35.6614, 139.6680).model_copy(
+        update={"place_id": UUID(int=3)}
+    )
+    policy = AreaClusteringPolicy(eps_meters=100, min_samples=3)
+
+    forward = cluster_places((border_left, core, border_right), policy=policy)
+    reverse = cluster_places((border_right, core, border_left), policy=policy)
+
+    assert len(forward) == 1
+    assert forward[0].place_ids == (UUID(int=1), UUID(int=2), UUID(int=3))
+    assert _membership(forward) == _membership(reverse)

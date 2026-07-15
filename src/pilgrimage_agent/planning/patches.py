@@ -63,6 +63,7 @@ def confirmation_required(operations: tuple[PatchOperation, ...]) -> bool:
         if isinstance(operation, UpdateRequirementOperation) and operation.field in {
             "origin",
             "destination",
+            "base_preference",
             "start_date",
             "end_date",
         }:
@@ -111,6 +112,9 @@ def analyze_impact(patch: PlanPatch) -> ImpactAnalysis:
                 )
             elif operation.field == "origin":
                 nodes.update({"access", "itinerary_planner"})
+                stable.update({"scene_evidence:*", "visit_place:*", "area:*"})
+            elif operation.field == "base_preference":
+                nodes.update({"base", "access_linkage", "itinerary_planner"})
                 stable.update({"scene_evidence:*", "visit_place:*", "area:*"})
             else:
                 nodes.update({"itinerary_planner"})

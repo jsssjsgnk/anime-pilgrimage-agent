@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -39,6 +39,15 @@ class ProjectStore(Protocol):
     async def get_trip(
         self, owner_user_id: str, thread_id: str, trip_id: UUID
     ) -> StoredTrip | None: ...
+
+    async def delete_trip(
+        self,
+        owner_user_id: str,
+        thread_id: str,
+        trip_id: UUID,
+        *,
+        checkpoint_thread_id: str | None = None,
+    ) -> bool: ...
 
     async def append_event(
         self, owner_user_id: str, trip_id: UUID, event_type: str, payload: dict[str, object]
@@ -89,6 +98,25 @@ class InMemoryProjectStore:
         if trip and (trip.owner_user_id, trip.thread_id) == (owner_user_id, thread_id):
             return trip
         return None
+
+    async def delete_trip(
+        self,
+        owner_user_id: str,
+        thread_id: str,
+        trip_id: UUID,
+        *,
+        checkpoint_thread_id: str | None = None,
+    ) -> bool:
+        del checkpoint_thread_id
+        trip = self.trips.get(trip_id)
+        if trip is None or (trip.owner_user_id, trip.thread_id) != (
+            owner_user_id,
+            thread_id,
+        ):
+            return False
+        del self.trips[trip_id]
+        self.events.pop(trip_id, None)
+        return True
 
     async def append_event(
         self, owner_user_id: str, trip_id: UUID, event_type: str, payload: dict[str, object]
@@ -192,6 +220,36 @@ class SqlProjectStore:
             thread_id=record.thread_id,
             state=record.state,
         )
+
+    async def delete_trip(
+        self,
+        owner_user_id: str,
+        thread_id: str,
+        trip_id: UUID,
+        *,
+        checkpoint_thread_id: str | None = None,
+    ) -> bool:
+        """Delete one namespaced trip and its graph state in one DB transaction."""
+
+        async with self.sessions.begin() as session:
+            record = await session.scalar(
+                select(TripRecord).where(
+                    TripRecord.id == trip_id,
+                    TripRecord.owner_user_id == owner_user_id,
+                    TripRecord.thread_id == thread_id,
+                )
+            )
+            if record is None:
+                return False
+            if checkpoint_thread_id is not None:
+                params = {"thread_id": checkpoint_thread_id}
+                for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+                    await session.execute(
+                        text(f"DELETE FROM {table} WHERE thread_id = :thread_id"),  # noqa: S608
+                        params,
+                    )
+            await session.delete(record)
+        return True
 
     async def append_event(
         self, owner_user_id: str, trip_id: UUID, event_type: str, payload: dict[str, object]

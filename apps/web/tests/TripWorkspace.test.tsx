@@ -15,6 +15,9 @@ function workspace(status: string, version: number): WorkspaceView {
     state_version: version,
     status,
     requirements: {
+      origin: "京都",
+      destination: "东京",
+      base_preference: "新宿",
       start_date: "2030-09-01",
       end_date: "2030-09-03",
       walking_preference: "medium",
@@ -24,7 +27,20 @@ function workspace(status: string, version: number): WorkspaceView {
       intent: { intent_id: intentId, query: "孤独摇滚！", priority: 5, is_primary: true, status: "proposed", confirmed_subject_id: null, confirmed_subject_ids: [] },
       candidates: [subject], status: "ok", warning: null,
     }],
-    confirmed_subjects: status === "awaiting_subject_confirmation" ? [] : [{ intent_id: intentId, subject, evidence_status: "ok" }],
+    confirmed_subjects: status === "awaiting_subject_confirmation" ? [] : [{
+      intent_id: intentId,
+      subject,
+      evidence_status: "ok",
+      point_collection: {
+        provider: "anitabi_static",
+        is_complete: false,
+        expected_count: 4,
+        loaded_count: 3,
+        data_version: "fixture-v1",
+        retrieved_at: "2030-01-01T00:00:00Z",
+        expires_at: "2030-01-02T00:00:00Z",
+      },
+    }],
     places: [],
     areas: [],
     base_candidates: status === "awaiting_subject_confirmation" ? [] : [{ base_id: "shimokitazawa", name: "下北泽", coordinate: { latitude: 35.66, longitude: 139.67 } }],
@@ -67,8 +83,34 @@ describe("TripWorkspace", () => {
     expect(screen.getByText("巡礼地点")).toBeVisible();
     const rawBody = fetchMock.mock.calls[0]?.[1]?.body;
     if (typeof rawBody !== "string") throw new Error("Expected a JSON request body");
-    const payload = JSON.parse(rawBody) as { requirements: { subject_intents: unknown[] } };
+    const payload = JSON.parse(rawBody) as {
+      request_summary: string;
+      requirements: Record<string, unknown> & { subject_intents: unknown[] };
+    };
     expect(payload.requirements.subject_intents).toHaveLength(2);
+    expect(payload.request_summary).toContain("每天不要走太多路");
+    expect(payload.requirements).not.toHaveProperty("origin");
+    expect(payload.requirements).not.toHaveProperty("destination");
+    expect(payload.requirements).not.toHaveProperty("walking_preference");
+  });
+
+  it("shows safe planning warnings without exposing internal implementation names", async () => {
+    const warned = {
+      ...workspace("awaiting_subject_confirmation", 1),
+      warnings: ["SearchAPI provider transit timeout", "LLM Reviewer failed safely"],
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL ? input.href : input.url;
+      return url.endsWith("/messages") ? json([]) : json(warned);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TripWorkspace />);
+    fireEvent.click(screen.getByRole("button", { name: "开始规划" }));
+    expect(await screen.findByRole("heading", { name: "需要留意" })).toBeVisible();
+    expect(screen.getByText(/部分交通资料暂时无法核实/u)).toBeVisible();
+    expect(screen.queryByText(/SearchAPI|LLM Reviewer|provider/u)).not.toBeInTheDocument();
   });
 
   it("allows several seasons for one title and submits them together", async () => {
@@ -135,6 +177,23 @@ describe("TripWorkspace", () => {
     fireEvent.click(await screen.findByRole("button", { name: "返回修改作品名称" }));
     expect(screen.getByLabelText("你的巡礼想法")).toBeVisible();
     expect(screen.getByRole("button", { name: "开始规划" })).toBeVisible();
+  });
+
+  it("discloses static point completeness and data version", async () => {
+    const ready = workspace("ready_for_planning", 2);
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL ? input.href : input.url;
+      return url.endsWith("/messages") && !init?.method ? json([]) : json(ready);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TripWorkspace />);
+
+    fireEvent.click(screen.getByRole("button", { name: "开始规划" }));
+    fireEvent.click(await screen.findByRole("button", { name: /资料说明/ }));
+    expect(screen.getByText(/3 \/ 4 个点位/)).toBeVisible();
+    expect(screen.getByText(/部分 · 静态地图资料 · 版本 fixture-v1/)).toBeVisible();
   });
 
   it("confirms subjects, plans, previews a PlanPatch, and applies it", async () => {
@@ -250,5 +309,64 @@ describe("TripWorkspace", () => {
     expect(screen.queryByText(tripId.slice(0, 8))).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`/api/workspaces/${tripId}`), expect.anything());
+  });
+
+  it("edits extracted trip conditions through a typed preview", async () => {
+    window.sessionStorage.setItem("pilgrimage-workspace-v2", tripId);
+    const current = workspace("planned", 7);
+    let previewOperation: unknown;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL ? input.href : input.url;
+      if (url.includes("/messages") && !init?.method) return json([]);
+      if (url.includes("/patches/preview")) {
+        if (typeof init?.body !== "string") throw new Error("Expected a patch body");
+        const request = JSON.parse(init.body) as { patch: PlanPatch };
+        previewOperation = request.patch.operations;
+        return json({
+          workspace: current,
+          preview: {
+            patch: request.patch,
+            impact: { patch_id: request.patch.patch_id, confirmation_required: true },
+          },
+        });
+      }
+      return json(current);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TripWorkspace />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "编辑行程条件" }));
+    fireEvent.change(screen.getByLabelText("出发地"), { target: { value: "大阪" } });
+    fireEvent.change(screen.getByLabelText("步行偏好"), { target: { value: "low" } });
+    fireEvent.click(screen.getByRole("button", { name: "预览条件修改" }));
+
+    expect(await screen.findByRole("dialog", { name: "应用这次修改？" })).toBeVisible();
+    expect(previewOperation).toEqual([
+      { op: "update_requirement", field: "origin", value: "大阪" },
+      { op: "update_requirement", field: "walking_preference", value: "low" },
+    ]);
+  });
+
+  it("keeps close separate and requires a second click for permanent deletion", async () => {
+    window.sessionStorage.setItem("pilgrimage-workspace-v2", tripId);
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL ? input.href : input.url;
+      if (init?.method === "DELETE") return json({ trip_id: tripId, deleted: true });
+      return url.includes("/messages") ? json([]) : json(workspace("planned", 7));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TripWorkspace />);
+
+    const deleteButton = await screen.findByRole("button", { name: "永久删除工作区" });
+    fireEvent.click(deleteButton);
+    expect(screen.getByRole("alert")).toHaveTextContent("且无法撤销");
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === "DELETE")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "再次点击确认永久删除" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[1]?.method === "DELETE")).toHaveLength(1));
+    expect(await screen.findByRole("button", { name: "开始规划" })).toBeVisible();
   });
 });

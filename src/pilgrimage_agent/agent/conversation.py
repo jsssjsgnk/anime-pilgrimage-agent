@@ -92,12 +92,78 @@ def context_from_workflow(workflow: WorkflowResponse) -> ConversationContext:
     )
 
 
+def context_from_workspace(workspace: object) -> ConversationContext:
+    """Build the same bounded chat projection from the authoritative v2 workspace."""
+
+    from pilgrimage_agent.agent.workspace import WorkspaceState
+
+    state = WorkspaceState.model_validate(workspace)
+    itinerary = state.itineraries[0] if state.itineraries else None
+    forecast = state.weather_forecast
+    subjects = "、".join(
+        item.subject.name_cn or item.subject.name for item in state.confirmed_subjects
+    )[:200]
+    latest_review = state.reviewer_assessments[-1] if state.reviewer_assessments else None
+    return ConversationContext(
+        phase=state.status.value,
+        status=state.status.value,
+        pending_confirmation=(
+            "subject" if state.status.value == "awaiting_subject_confirmation" else None
+        ),
+        subject=subjects or None,
+        route_a_point_count=len(state.places),
+        route_a_is_complete=(
+            all(
+                item.point_collection is not None and item.point_collection.is_complete
+                for item in state.confirmed_subjects
+            )
+            if state.confirmed_subjects
+            else None
+        ),
+        route_b_day_count=len(itinerary.days) if itinerary else 0,
+        daily_walking_meters=(
+            tuple(round(day.walking_distance_meters) for day in itinerary.days)
+            if itinerary
+            else ()
+        ),
+        matrix_status=(state.areas[0].travel_time_status if state.areas else None),
+        weather_available=forecast.available if forecast else None,
+        weather_summary=(
+            tuple(
+                f"{item.date.isoformat()}: rain={item.precipitation_probability_max}%"
+                for item in forecast.windows[:14]
+            )
+            if forecast
+            else ()
+        ),
+        evidence_count=len(state.knowledge_evidence),
+        evidence_status=(
+            "sufficient_evidence" if state.knowledge_evidence else "insufficient_evidence"
+        ),
+        omitted_point_count=len(itinerary.omissions) if itinerary else 0,
+        warning_summary=state.warnings[-8:],
+        validation_summary=(
+            tuple(
+                f"{item.code}: {item.detail}"
+                for item in itinerary.validation_issues[-8:]
+            )
+            if itinerary
+            else ()
+        ),
+        reviewer_explanation=latest_review.explanation if latest_review else None,
+        revision_count=min(3, len(state.diffs)),
+    )
+
+
 class ConversationResponder(Protocol):
     async def respond(
         self,
         context: ConversationContext,
         recent_messages: tuple[ConversationMessage, ...],
         message: str,
+        *,
+        memory_summary: str | None = None,
+        critical_decisions: tuple[str, ...] = (),
     ) -> ConversationDecision: ...
 
 
@@ -119,8 +185,11 @@ class DeterministicConversationAgent:
         context: ConversationContext,
         recent_messages: tuple[ConversationMessage, ...],
         message: str,
+        *,
+        memory_summary: str | None = None,
+        critical_decisions: tuple[str, ...] = (),
     ) -> ConversationDecision:
-        del recent_messages
+        del recent_messages, memory_summary, critical_decisions
         normalized = message.strip()
         if _is_modification(normalized):
             try:
@@ -173,7 +242,7 @@ class DeterministicConversationAgent:
             return ConversationDecision(
                 intent=ConversationIntent.POINT_COVERAGE,
                 answer=(
-                    f"当前 Route A 有 {context.route_a_point_count} 个有来源点位；"
+                    f"当前已整理 {context.route_a_point_count} 个有来源地点；"
                     f"{completeness}。"
                 ),
                 supporting_fields=("route_a",),
@@ -242,8 +311,8 @@ class DeterministicConversationAgent:
         return ConversationDecision(
             intent=ConversationIntent.GENERAL,
             answer=(
-                "我可以基于当前行程解释安排、点位完整度、天气与证据，说明下一步，"
-                "也可以执行“第二天少走 30%”这类受约束的局部重规划。"
+                "我可以基于当前行程解释安排、地点完整度、天气与证据，说明下一步，"
+                "也可以把明确的修改整理成确认前预览。"
                 "目前没有足够的已验证行程事实来回答这个问题，请换一种更具体的问法。"
             ),
             supporting_fields=("phase",),
@@ -261,6 +330,9 @@ class LlmConversationAgent:
         context: ConversationContext,
         recent_messages: tuple[ConversationMessage, ...],
         message: str,
+        *,
+        memory_summary: str | None = None,
+        critical_decisions: tuple[str, ...] = (),
     ) -> ConversationDecision:
         history = tuple(
             {"role": item.role, "content": item.content[:1000]}
@@ -275,6 +347,8 @@ class LlmConversationAgent:
                 "reduction with one target day and percentage; emit it as `modification`, never "
                 "claim it already happened. Critical confirmations must stay explicit in the UI. "
                 f"Context: {context.model_dump_json()}\n"
+                f"Traceable earlier summary: {memory_summary or 'none'}\n"
+                f"Critical user decisions (preserve exactly): {critical_decisions!r}\n"
                 f"Recent messages: {history!r}\n"
                 f"Current user message: {message}"
             ),
@@ -296,13 +370,26 @@ class ResilientConversationAgent:
         context: ConversationContext,
         recent_messages: tuple[ConversationMessage, ...],
         message: str,
+        *,
+        memory_summary: str | None = None,
+        critical_decisions: tuple[str, ...] = (),
     ) -> ConversationDecision:
         deterministic = await self.fallback.respond(
-            context, recent_messages, message
+            context,
+            recent_messages,
+            message,
+            memory_summary=memory_summary,
+            critical_decisions=critical_decisions,
         )
         if deterministic.intent is not ConversationIntent.GENERAL:
             return deterministic
         try:
-            return await self.primary.respond(context, recent_messages, message)
+            return await self.primary.respond(
+                context,
+                recent_messages,
+                message,
+                memory_summary=memory_summary,
+                critical_decisions=critical_decisions,
+            )
         except StructuredOutputError:
             return deterministic

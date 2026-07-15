@@ -122,6 +122,30 @@ def test_resolution_membership_and_ids_are_stable_under_input_order() -> None:
     }
 
 
+def test_same_source_label_is_not_place_identity() -> None:
+    first = _evidence(
+        "source-a",
+        "328609",
+        "Completely Different Facility",
+        35.66110,
+        139.66810,
+        source_label="same article title",
+    )
+    second = _evidence(
+        "source-b",
+        "lycoris",
+        "Unrelated Street Corner",
+        35.66111,
+        139.66811,
+        source_label="same article title",
+    )
+
+    result = resolve_places((first, second))
+
+    assert len(result.places) == 2
+    assert result.ambiguous_merges
+
+
 def test_manual_split_and_merge_overrides_survive_reingestion() -> None:
     first, second, exit_one, exit_two, *_rest = _corpus()
     split = PlaceResolutionOverride(

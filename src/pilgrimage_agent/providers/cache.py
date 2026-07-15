@@ -46,6 +46,11 @@ class MemoryProviderCache[T]:
         self._items.move_to_end(fingerprint)
         return entry.value
 
+    def clear(self) -> None:
+        """Invalidate only this provider instance's bounded cache."""
+
+        self._items.clear()
+
     def put(
         self,
         *,

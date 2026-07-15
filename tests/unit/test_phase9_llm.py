@@ -30,8 +30,17 @@ async def test_chinese_requirement_fallback_is_editable_and_discloses_assumption
     assert (result.requirements.start_date.month, result.requirements.start_date.day) == (9, 1)
     assert (result.requirements.end_date - result.requirements.start_date).days == 2
     assert result.requirements.max_walking_meters_per_day == 5_000
+    assert result.requirements.transit_route_preference == "less_walking"
     assert result.assumptions
     assert not result.missing_fields
+
+
+async def test_chinese_fallback_preserves_fewer_transfer_preference() -> None:
+    result = await DeterministicRequirementExtractor().extract(
+        "我从京都出发, 九月去东京一天, 想巡礼《孤独摇滚!》, 尽量少换乘。"
+    )
+
+    assert result.requirements.transit_route_preference == "fewer_transfers"
 
 
 async def test_fixture_reviewer_obeys_deterministic_violations() -> None:

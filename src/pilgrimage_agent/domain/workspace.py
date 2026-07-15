@@ -144,6 +144,24 @@ class AreaCluster(StrictModel):
     warnings: tuple[str, ...] = ()
 
 
+class PlaceWalkingEdge(StrictModel):
+    source_place_id: UUID
+    target_place_id: UUID
+    duration_seconds: float = Field(ge=0)
+    distance_meters: float = Field(ge=0)
+    provenance: DataProvenance
+
+
+class AreaTransitEdge(StrictModel):
+    source_area_id: UUID
+    target_area_id: UUID
+    duration_seconds: int = Field(ge=0)
+    walking_seconds: int = Field(ge=0)
+    transfers: int = Field(ge=0)
+    option_id: str = Field(min_length=1, max_length=200)
+    provenance: DataProvenance
+
+
 class CandidateDecision(StrictModel):
     entity_type: Literal["place", "area"]
     entity_id: UUID
@@ -231,6 +249,7 @@ class StructuredOmission(StrictModel):
         "lower_strategy_score",
         "unverified",
         "unreachable",
+        "user_removed",
     ]
     detail: str = Field(min_length=1, max_length=500)
 
@@ -279,6 +298,7 @@ class UpdateRequirementOperation(StrictModel):
     field: Literal[
         "origin",
         "destination",
+        "base_preference",
         "start_date",
         "end_date",
         "budget_level",
@@ -306,7 +326,7 @@ class UpdateRequirementOperation(StrictModel):
 
     @model_validator(mode="after")
     def value_matches_field(self) -> UpdateRequirementOperation:
-        if self.field in {"origin", "destination"} and not (
+        if self.field in {"origin", "destination", "base_preference"} and not (
             self.value is None or isinstance(self.value, str)
         ):
             raise ValueError("text requirements accept only text or null")
@@ -469,8 +489,12 @@ class AgentRole(StrEnum):
     SUBJECT = "subject"
     EVIDENCE_COLLECTOR = "evidence_collector"
     PLACE_CURATOR = "place_curator"
+    TRAVEL_AREA_BUILDER = "travel_area_builder"
     ACCESS = "access"
     BASE = "base"
+    PLACE_FACTS = "place_facts"
+    WEATHER = "weather"
+    KNOWLEDGE = "knowledge"
     ITINERARY_PLANNER = "itinerary_planner"
     VALIDATOR = "validator"
     REVIEWER = "reviewer"
@@ -494,19 +518,31 @@ class AgentHandoff(StrictModel):
     constraint_refs: tuple[EntityRef, ...] = ()
     evidence_refs: tuple[EntityRef, ...] = ()
     expected_output_schema: str = Field(min_length=1, max_length=200)
-    status: Literal["pending", "running", "completed", "partial", "failed"]
+    status: Literal[
+        "pending", "running", "completed", "partial", "failed", "cancelled"
+    ]
     result_refs: tuple[EntityRef, ...] = ()
     warnings: tuple[str, ...] = ()
     safe_error: str | None = Field(default=None, max_length=500)
     retry_count: int = Field(default=0, ge=0, le=3)
+    correlation_id: UUID = Field(default_factory=uuid4)
+    parent_handoff_id: UUID | None = None
     created_at: datetime
+    started_at: datetime | None = None
     completed_at: datetime | None = None
 
     @model_validator(mode="after")
     def completion_timestamp_is_consistent(self) -> AgentHandoff:
-        terminal = self.status in {"completed", "partial", "failed"}
+        terminal = self.status in {"completed", "partial", "failed", "cancelled"}
         if terminal != (self.completed_at is not None):
             raise ValueError("terminal handoff status and completion timestamp must agree")
+        started = self.status in {"running", "completed", "partial", "failed"}
+        if started != (self.started_at is not None):
+            raise ValueError("executed handoff status and start timestamp must agree")
+        if self.started_at is not None and self.started_at < self.created_at:
+            raise ValueError("handoff cannot start before it is created")
+        if self.completed_at is not None and self.completed_at < self.created_at:
+            raise ValueError("handoff cannot complete before it is created")
         return self
 
 

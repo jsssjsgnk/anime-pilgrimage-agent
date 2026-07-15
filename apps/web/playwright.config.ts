@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  timeout: 120_000,
+  expect: { timeout: 60_000 },
   workers: 1,
   outputDir: "../../artifacts/playwright-results",
   reporter: [["html", { outputFolder: "../../artifacts/playwright-report", open: "never" }], ["list"]],

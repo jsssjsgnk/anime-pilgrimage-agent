@@ -10,7 +10,7 @@ from pydantic import Field
 
 from pilgrimage_agent.domain.models import StrictModel
 from pilgrimage_agent.domain.workspace import DerivedKnowledgeRule, EntityRef
-from pilgrimage_agent.rag.schemas import KnowledgeSearchResult
+from pilgrimage_agent.rag.schemas import KnowledgeSearchResult, RetrievedEvidence
 
 
 class KnowledgeRuleProposal(StrictModel):
@@ -28,6 +28,20 @@ class KnowledgeRuleProposal(StrictModel):
     evidence_ids: tuple[str, ...] = Field(min_length=1, max_length=12)
     valid_from: date | None = None
     valid_until: date | None = None
+
+
+class KnowledgeRuleProposalInput(StrictModel):
+    """Only normalized evidence excerpts and allowed entity refs cross the LLM boundary."""
+
+    question: str = Field(min_length=2, max_length=1000)
+    evidence: tuple[RetrievedEvidence, ...] = Field(max_length=6)
+    allowed_target_refs: tuple[EntityRef, ...] = Field(min_length=1, max_length=20)
+    travel_start: date | None = None
+    travel_end: date | None = None
+
+
+class KnowledgeRuleProposalBatch(StrictModel):
+    proposals: tuple[KnowledgeRuleProposal, ...] = Field(default=(), max_length=8)
 
 
 class WorkspaceKnowledgeRuleRequest(StrictModel):
