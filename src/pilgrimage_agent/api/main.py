@@ -426,6 +426,24 @@ def _configured_conversation_responder() -> ConversationResponder:
     return DeterministicConversationAgent()
 
 
+def _is_workspace_flight_question(message: str) -> bool:
+    normalized = message.casefold()
+    return any(term in normalized for term in ("机票", "航班", "飞机", "flight"))
+
+
+def _can_query_workspace_flights(state: WorkspaceState) -> bool:
+    requirements = state.requirements
+    return bool(
+        requirements.origin_iata
+        and requirements.destination_iata
+        and requirements.start_date
+    )
+
+
+def _has_flight_snapshot(state: WorkspaceState) -> bool:
+    return any(item.kind == "flight" for item in state.provider_snapshots)
+
+
 async def _answer_workspace_question(
     store: ProjectStore,
     state: WorkspaceState,
@@ -1494,6 +1512,17 @@ async def send_workspace_message(
                 f"目前已确认 {len(state.confirmed_subjects)} 部作品, 整理出 "
                 f"{len(state.places)} 个巡礼地点和 {len(state.areas)} 个游览区域。"
                 f"现在有 {len(state.itineraries)} 个可回看的行程版本。"
+            )
+        elif _is_workspace_flight_question(request.message):
+            if (
+                not state.flight_options
+                and not _has_flight_snapshot(state)
+                and _can_query_workspace_flights(state)
+            ):
+                updated = await agent.collect_access_candidates(state)
+                await _save_workspace(store, updated, "workspace_access_refreshed")
+            intent, answer, action = await _answer_workspace_question(
+                store, updated, request.message
             )
         elif state.itineraries:
             try:

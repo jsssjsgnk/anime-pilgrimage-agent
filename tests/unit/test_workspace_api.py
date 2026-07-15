@@ -81,10 +81,12 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
         thread_id="thread-a",
         request_summary="两天巡礼《孤独摇滚》。",
         requirements=TripRequest(
-            origin="京都",
+            origin="杭州",
             destination="东京",
             start_date=start_date,
             end_date=start_date + timedelta(days=1),
+            origin_iata="HGH",
+            destination_iata="NRT",
             anime_query="孤独摇滚",
             subject_intents=(SubjectIntent(query="孤独摇滚", priority=5, is_primary=True),),
         ),
@@ -176,6 +178,22 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
                 "owner_user_id": "user-a",
                 "thread_id": "thread-a",
                 "message": "目前进展如何?",
+            },
+        )
+        route_message = await client.post(
+            f"/api/workspaces/{trip_id}/messages",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "message": "第一天怎么走?",
+            },
+        )
+        flight_message = await client.post(
+            f"/api/workspaces/{trip_id}/messages",
+            json={
+                "owner_user_id": "user-a",
+                "thread_id": "thread-a",
+                "message": "可以查询杭州到东京的航班吗?",
             },
         )
         restored_messages = await client.get(
@@ -358,10 +376,23 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
     assert planned.status_code == 200
     assert len(planned.json()["itineraries"]) == 2
     assert status_message.status_code == 200
+    assert route_message.status_code == 200
+    route_answer = route_message.json()["assistant_message"]["content"]
+    assert "计划顺序" in route_answer
+    assert "提供三个地点" not in route_answer
+    assert flight_message.status_code == 200
+    flight_answer = flight_message.json()["assistant_message"]["content"]
+    assert "可以查询只读航班候选" in flight_answer
+    assert "不会预订或付款" in flight_answer
+    assert "无法直接查询" not in flight_answer
     assert status_message.json()["preview"] is None
     assert "已确认 1 部作品" in status_message.json()["assistant_message"]["content"]
     assert restored_messages.status_code == 200
     assert [item["role"] for item in restored_messages.json()] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
         "user",
         "assistant",
         "user",
@@ -433,6 +464,10 @@ async def test_workspace_api_start_confirm_plan_and_evidence_projection(
         "workspace_patch_proposed",
         "workspace_patch_applied",
         "workspace_planned",
+        "conversation_message",
+        "conversation_message",
+        "conversation_message",
+        "conversation_message",
         "conversation_message",
         "conversation_message",
         "workspace_patch_proposed",

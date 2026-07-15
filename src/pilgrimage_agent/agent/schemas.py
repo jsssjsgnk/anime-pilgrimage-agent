@@ -89,6 +89,7 @@ class ConversationIntent(StrEnum):
     POINT_COVERAGE = "point_coverage"
     WEATHER = "weather"
     EVIDENCE = "evidence"
+    ACCESS = "access"
     UNSUPPORTED_CHANGE = "unsupported_change"
     GENERAL = "general"
 

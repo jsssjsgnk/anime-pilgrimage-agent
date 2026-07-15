@@ -4,13 +4,17 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import httpx
 from pytest import MonkeyPatch
 
 from pilgrimage_agent.agent.conversation import (
+    ConversationAccessOption,
     ConversationContext,
+    ConversationDayContext,
+    ConversationVisitContext,
     DeterministicConversationAgent,
     ResilientConversationAgent,
 )
@@ -88,6 +92,81 @@ async def test_recognized_safe_intent_does_not_wait_for_llm() -> None:
 
     assert result.intent is ConversationIntent.MODIFY_PLAN
     assert result.modification is not None
+
+
+async def test_conversation_uses_existing_route_instead_of_asking_for_places() -> None:
+    agent = DeterministicConversationAgent()
+    start = datetime(2030, 8, 13, 9, tzinfo=UTC)
+    context = waiting_context().model_copy(
+        update={
+            "pending_confirmation": None,
+            "route_b_day_count": 1,
+            "matrix_status": "road",
+            "itinerary_days": (
+                ConversationDayContext(
+                    day_index=1,
+                    date=date(2030, 8, 13),
+                    visits=(
+                        ConversationVisitContext(
+                            name="下北泽站东口",
+                            start_at=start,
+                            end_at=start.replace(hour=10),
+                            incoming_distance_meters=0,
+                            incoming_duration_seconds=0,
+                        ),
+                        ConversationVisitContext(
+                            name="本多剧场",
+                            start_at=start.replace(hour=10),
+                            end_at=start.replace(hour=11),
+                            incoming_distance_meters=650,
+                            incoming_duration_seconds=540,
+                        ),
+                    ),
+                    walking_distance_meters=650,
+                    duration_minutes=120,
+                ),
+            ),
+        }
+    )
+
+    result = await agent.respond(context, (), "第一天怎么走？")
+
+    assert result.intent is ConversationIntent.EXPLAIN_PLAN
+    assert "下北泽站东口 → 本多剧场" in result.answer
+    assert "提供三个地点" not in result.answer
+
+
+async def test_conversation_distinguishes_flight_query_from_booking() -> None:
+    agent = DeterministicConversationAgent()
+    start = datetime(2030, 8, 13, 1, tzinfo=UTC)
+    context = waiting_context().model_copy(
+        update={
+            "pending_confirmation": None,
+            "origin": "杭州",
+            "destination": "东京",
+            "start_date": date(2030, 8, 13),
+            "origin_iata": "HGH",
+            "destination_iata": "NRT",
+            "access_options": (
+                ConversationAccessOption(
+                    mode="flight",
+                    origin="HGH",
+                    destination="NRT",
+                    departure_at=start,
+                    arrival_at=start.replace(hour=5),
+                    price=1800,
+                    currency="CNY",
+                ),
+            ),
+        }
+    )
+
+    result = await agent.respond(context, (), "能帮我查询机票吗？")
+
+    assert result.intent is ConversationIntent.ACCESS
+    assert "HGH → NRT" in result.answer
+    assert "可以查询只读航班候选" in result.answer
+    assert "不会预订或付款" in result.answer
 
 
 async def test_conversation_api_persists_and_recovers_only_inside_namespace(
