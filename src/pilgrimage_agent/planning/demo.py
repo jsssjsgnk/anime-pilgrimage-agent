@@ -25,6 +25,10 @@ from pilgrimage_agent.domain.planning import (
     RouteBRequest,
 )
 from pilgrimage_agent.planning.access import select_access_options
+from pilgrimage_agent.planning.integrated import (
+    matrix_candidate_route,
+    restore_full_route_a_membership,
+)
 from pilgrimage_agent.planning.planner import build_route_b
 from pilgrimage_agent.providers.common import provenance
 from pilgrimage_agent.providers.intercity import FixtureManualIntercityProvider
@@ -160,16 +164,6 @@ async def plan_demo_route_b(
     outbound = by_option[request.outbound_option_id]
     access = select_access_options(inbound_options=(inbound,), outbound_options=(outbound,))
     base = by_base[request.base_id]
-    coordinates = (
-        base.coordinate,
-        *(
-            GeoCoordinate(latitude=point.latitude, longitude=point.longitude)
-            for point in route_a.points
-        ),
-    )
-    matrix = await FixtureOpenRouteServiceProvider().matrix(
-        MatrixQuery(coordinates=coordinates)
-    )
     constraints = PlanningConstraints(
         start_date=options.start_date,
         end_date=options.end_date,
@@ -179,12 +173,34 @@ async def plan_demo_route_b(
         must_visit_point_ids=request.must_visit_point_ids,
         excluded_point_ids=request.excluded_point_ids,
     )
-    return build_route_b(
-        route_a=route_a,
+    candidate_route, matrix_omitted_ids = matrix_candidate_route(
+        route_a,
+        base,
+        must_visit_point_ids=constraints.must_visit_point_ids,
+        excluded_point_ids=constraints.excluded_point_ids,
+    )
+    coordinates = (
+        base.coordinate,
+        *(
+            GeoCoordinate(latitude=point.latitude, longitude=point.longitude)
+            for point in candidate_route.points
+        ),
+    )
+    matrix = await FixtureOpenRouteServiceProvider().matrix(
+        MatrixQuery(coordinates=coordinates)
+    )
+    candidate_plan = build_route_b(
+        route_a=candidate_route,
         base=base,
         matrix=matrix,
         constraints=constraints,
         access=access,
+    )
+    return restore_full_route_a_membership(
+        candidate_plan,
+        route_a,
+        matrix_omitted_ids=matrix_omitted_ids,
+        excluded_point_ids=constraints.excluded_point_ids,
     )
 
 

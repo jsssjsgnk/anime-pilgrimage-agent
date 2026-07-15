@@ -20,12 +20,16 @@ class SafeHttpClient:
         provider: str,
         timeout_seconds: float,
         max_attempts: int,
+        max_response_bytes: int = 8 * 1024 * 1024,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         if max_attempts < 1 or max_attempts > 5:
             raise ValueError("max_attempts must be between 1 and 5")
         self.provider = provider
         self.max_attempts = max_attempts
+        if max_response_bytes < 1 or max_response_bytes > 64 * 1024 * 1024:
+            raise ValueError("max_response_bytes must be between 1 byte and 64 MiB")
+        self.max_response_bytes = max_response_bytes
         self._owned_client = client is None
         self.client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(timeout_seconds),
@@ -109,6 +113,24 @@ class SafeHttpClient:
                         "The upstream service rejected the normalized request.",
                     )
                 else:
+                    content_length = response.headers.get("content-length")
+                    if content_length is not None:
+                        try:
+                            advertised_size = int(content_length)
+                        except ValueError:
+                            advertised_size = 0
+                        if advertised_size > self.max_response_bytes:
+                            raise ProviderError(
+                                ProviderErrorKind.UPSTREAM,
+                                self.provider,
+                                "The upstream response exceeded the allowed size.",
+                            )
+                    if len(response.content) > self.max_response_bytes:
+                        raise ProviderError(
+                            ProviderErrorKind.UPSTREAM,
+                            self.provider,
+                            "The upstream response exceeded the allowed size.",
+                        )
                     try:
                         return response.json()
                     except ValueError:
@@ -121,4 +143,3 @@ class SafeHttpClient:
                 await asyncio.sleep(0.05 * attempt)
         assert last_error is not None
         raise last_error
-

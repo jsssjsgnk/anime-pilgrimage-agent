@@ -4,6 +4,10 @@ from datetime import date
 from pathlib import Path
 from uuid import UUID
 
+from pytest import MonkeyPatch
+
+from pilgrimage_agent.rag import embedding as embedding_module
+from pilgrimage_agent.rag.embedding import LazySentenceTransformerE5Embedder
 from pilgrimage_agent.rag.evaluation import evaluate
 from pilgrimage_agent.rag.fixtures import load_fixture_index
 from pilgrimage_agent.rag.retrieval import (
@@ -98,3 +102,27 @@ def test_duplicate_ingestion_and_delete_remove_all_results() -> None:
         KnowledgeQuery(owner_user_id="user-a", question="unique violet elevator north gate")
     )
     assert after_delete.status == "insufficient_evidence"
+
+
+def test_lazy_real_e5_defers_delegate_until_first_embedding(monkeypatch: MonkeyPatch) -> None:
+    created: list[bool] = []
+
+    class FakeRealE5:
+        def __init__(self) -> None:
+            created.append(True)
+
+        def embed_query(self, _text: str) -> tuple[float, ...]:
+            return (1.0,) * 384
+
+        def embed_passages(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+            return tuple((1.0,) * 384 for _ in texts)
+
+        def token_count(self, _text: str) -> int:
+            return 3
+
+    monkeypatch.setattr(embedding_module, "SentenceTransformerE5Embedder", FakeRealE5)
+    embedder = LazySentenceTransformerE5Embedder()
+    assert not created
+    assert len(embedder.embed_query("東京")) == 384
+    assert embedder.token_count("東京") == 3
+    assert created == [True]

@@ -1,10 +1,10 @@
 # Task Plan: Anime Pilgrimage Agent — Six-Phase Delivery
 
 ## Goal
-Read the complete required handoff chain, implement and verify all six project phases, and finish only when `make verify-all` passes or a genuine user-only blocker is documented.
+Implement the authoritative remediation specification across the real product path, preserve legacy compatibility/regressions, and finish only when scenarios A–J pass or a genuine user-only blocker is documented honestly.
 
 ## Current Phase
-Complete — Phase 7 map correction verified and all four Compose services healthy
+Phase 20 in progress — large batch itinerary mutations and safe validation feedback
 
 ## Phases
 
@@ -59,6 +59,122 @@ Complete — Phase 7 map correction verified and all four Compose services healt
 - [x] Rebuild the Web service and confirm the correction interactively
 - **Status:** complete
 
+### Phase 8: Requirements and simplification audit
+- [x] Re-read the complete handoff chain and enumerate normative requirements
+- [x] Verify every requirement against code, configuration, tests, reports, and runtime boundaries
+- [x] Re-check current official Anitabi API/access evidence
+- [x] Classify each item as satisfied, conditional fallback, simplified/partial, or unmet
+- [x] Publish an evidence-linked count without changing product implementation
+- **Status:** complete
+
+### Phase 9: Integrated Agent and Provider foundation
+- [x] Add the required MCP adapter dependency and a typed MCP client boundary
+- [x] Replace placeholder graph state/nodes with normalized trip requirements and real provider/planner results
+- [x] Implement Anitabi as a first-class required read-only Provider with fixture/contracts/cache/honest partial semantics, while keeping configurable legal import as fallback
+- [x] Wire real/fixture E5 selection and remove fixture embeddings from production composition
+- [x] Add focused contracts and pass lint, typecheck, and Agent/provider tests
+- **Status:** complete
+
+### Phase 10: Product workflow, constraints, transport, weather, and memory
+- [x] Drive the Web through the durable Agent workflow instead of demo endpoints
+- [x] Add editable constraints and explicit requirement/subject/access/base/must/exclude confirmations
+- [x] Integrate manual/flight access options, weather constraints, configured ORS/Haversine, Reviewer, omissions, and preference lifecycle
+- [x] Add data-state/source/time presentation and actionable recovery states
+- **Status:** complete
+
+### Phase 11: Complete maps, revision, RAG and scenarios
+- [x] Add Route A/Route B map switching and provenance legend
+- [x] Implement schema-driven local natural-language changes with percentage constraints
+- [x] Make RAG queries/upload/conflicts dynamic in Agent/Web
+- [x] Implement complete S1, S2, and S3 acceptance scenarios
+- **Status:** complete
+
+### Phase 12: Coverage, full gates, documentation, and honest acceptance
+- [x] Raise Domain Validator branch coverage to at least 90%
+- [x] Update reports and limitations to reflect actual integrated behavior and remaining authorized fallbacks
+- [x] Run and fix every phase gate and `make verify-all`
+- [x] Re-audit all 47 capability groups and close every implementation gap; retain the documented Anitabi detail-coverage limitation
+- **Status:** complete
+
+### Phase 13: Continuous conversational Agent
+- [x] Audit current workflow/checkpoint/message persistence and define the conversation contract
+- [x] Add typed persistent conversation messages, bounded context reconstruction, and intent routing
+- [x] Support clarification, trip questions, plan explanations, and safe requirement/plan changes across turns
+- [x] Add a trip-scoped Web chat surface with history, pending state, and actionable Agent responses
+- [x] Add unit/API/Web/E2E coverage for conversation recovery and deterministic confirmation boundaries
+- [x] Rebuild Compose and pass affected gates plus `make verify-all`
+- **Status:** complete
+
+### Phase 14: Authoritative remediation audit and implementation
+- [x] Safely extract and fully read the five required remediation documents plus the required historical context
+- [x] Map every remediation requirement and acceptance scenario to current code/tests
+- [x] Define the new architecture and implementation order without treating old gates as sufficient
+- [x] Implement multi-work support, scene/location consolidation, real clustering, and hierarchical planning
+- [x] Implement structured Agent communication, context engineering, PlanPatch, and RAG constraint closure
+- [x] Replace the wizard-like Web flow with a freer workspace while retaining compatible Route views
+- [x] Add remediation-specific unit/contract/API/Compose/browser gates and fix all failures
+- [x] Re-run legacy regression gates plus the new remediation acceptance and publish honest reports
+- **Status:** complete (`make verify-all` PASS, including remediation A-J)
+
+### Phase 15: Single natural-conversation product flow
+- [x] Remove implementation/provider terminology from user-facing workspace copy
+- [x] Remove workspace IDs, raw state enums, Agent role names, and task identifiers from the consumer UI
+- [x] Accept natural multi-work requests instead of requiring one title per line
+- [x] Remove the visible legacy Route A/Route B flow while retaining backend compatibility only
+- [x] Add scene-rich point details loaded on marker selection
+- [x] Add marker multi-selection and previewed batch itinerary actions
+- [x] Update unit and browser acceptance to enforce one visible workflow
+- [x] Run focused and aggregate gates, document results, commit, and push
+- **Status:** complete (`make verify-all` PASS; commit and push follow in this handoff)
+
+### Phase 16: Workspace initial-state canvas correction
+- [x] Reproduce the desktop initial-state layout defect and identify the sizing/overflow cause
+- [x] Replace the oversized empty center canvas with a compact, informative empty state
+- [x] Ensure no hidden toolbar or content edge leaks below the initial viewport
+- [x] Default the map to the dominant local area and render visible, clickable numbered point markers
+- [x] Verify desktop, mobile, lint, typecheck, unit, and focused browser acceptance
+- [x] Commit and push the correction to the current branch
+- **Status:** complete (`make verify-all` PASS; committed and pushed in this handoff)
+
+### Phase 17: Arbitrary work discovery and recovery
+- [x] Reproduce the missing-candidate failure with “轻音少女” and trace the actual Provider path
+- [x] Make ordinary valid titles discoverable without relying on the tiny fixture candidate list
+- [x] Allow one natural title intent to confirm multiple seasons/films and merge their shared places
+- [x] Add an in-flow correction/retry path when no candidate is found
+- [x] Verify subject confirmation, Anitabi evidence retrieval, and map behavior with the new title
+- [x] Run focused gates plus `make verify-all`, then commit and push
+- **Status:** complete (`make verify-all` PASS; committed and pushed in this handoff)
+
+### Phase 18: Freely editable multi-work collection
+- [x] Reproduce why the running UI still presents single-select candidates
+- [x] Make candidate versions genuinely multi-select with clear selected counts
+- [x] Add persistent add-work and remove-work operations before and after planning
+- [x] Preserve remaining works, evidence, places, and itinerary state across collection edits
+- [x] Add API, unit, and browser regressions for add/remove/re-add flows
+- [x] Rebuild the running stack, run focused gates and `make verify-all`, then commit and push
+- **Status:** complete (`make verify-all` PASS; commit and push follow in this handoff)
+
+### Phase 19: Authoritative Agent-runtime remediation
+- [x] Fully read `CODEX_REMEDIATION_HANDOFF.md` and map every requirement to current code/tests
+- [x] Confirm branch/head against review baseline `c544c3b` and preserve all later/user changes
+- [x] Run the existing regression suite and record an honest baseline, including live/fixture boundaries
+- [x] Implement the Workspace LangGraph main chain, durable interrupts, real handoffs, and actual Requirement/Reviewer/Replanner boundaries
+- [x] Continue verified gaps in dependency order, prioritizing deletion semantics, tool constraints, travel Providers, planning, context, and RAG
+- [x] Adopt the handoff-specified MiriaGo static-data path for complete Anitabi points
+- [x] Add unit, API, Web/E2E, and Compose acceptance for every independent work item
+- [x] Run focused gates after each work item and finish with the aggregate acceptance gate
+- **Status:** complete (`make verify-all` PASS; remediation A-J PASS)
+
+### Phase 20: Large batch itinerary mutations and safe validation feedback
+- [x] Reproduce the 109-place batch failure and trace the 25-operation schema limit
+- [x] Add a bounded batch-place operation that preserves one preview/apply/impact path
+- [x] Replace raw validation payloads with concise user-facing errors
+- [x] Add unit, API, Web, and browser regression coverage for more than 25 places
+- [x] Rebuild Compose and verify the exact 109-place interaction
+- [x] Run focused checks under the updated layered-validation policy
+- [x] Commit and push the focused correction
+- **Status:** complete under the layered-validation policy
+
 ## Key Questions
 1. Which exact documents and acceptance criteria does `START_HERE.md` require?
 2. What code already exists, and which unrelated user changes must be preserved?
@@ -72,10 +188,19 @@ Complete — Phase 7 map correction verified and all four Compose services healt
 | Treat each phase gate plus its human-readable artifact as the phase completion condition | Matches the mandated workflow |
 | Use the official OpenFreeMap Liberty style with visible OpenFreeMap/OpenStreetMap attribution | Restores the specified basemap without an API key while preserving source licensing and a configurable future replacement path |
 | Keep the three verified fixture points but label their scope honestly | Adding unsourced scene coordinates would violate the no-invention and legal-access boundaries |
+| Make conversation trip-scoped and durable, but keep arithmetic, membership, confirmations, and tool execution deterministic | Expands the Agent's role without allowing free-form model output to silently mutate constraints or invent travel facts |
+| Treat the five user-supplied remediation documents as the new authoritative product baseline | The user explicitly superseded the assumption that legacy six-phase acceptance proves feature completeness |
+| Make `/api/workspaces` the remediated product path and retain `/api/workflows` only as a schema-isolated compatibility path | Prevents legacy Route A/B response assumptions from constraining multi-subject evidence, place, area, and strategy versions |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
+| Baseline `make verify-all` wrapper was given a one-second command timeout and was terminated before tests started | 1 | Record it as an execution error, then rerun with a long bounded command budget and streamed polling |
+| First static-Adapter lint pass found one self-reference annotation, one import-order issue, and one unused test import | 1 | Apply the three mechanical corrections before rerunning lint and strict typing |
+| First Phase 19 Phase 2 gate found the new Anitabi fallback diagnostic value absent from its Literal schema | 1 | Extend the value-safe diagnostic enum, assert the fallback chain, and rerun the full gate before Compose acceptance |
+| Rebuilt Route A exposed 394 records although the static Provider loaded 414/414 | 1 | Remove name/coordinate scene dedupe from the compatibility view; dedupe only exact stable IDs and leave real-place merging to CanonicalPlace resolution |
+| Phase 2 API smoke rejected the corrected 414 records because its old uniqueness check still used name and coordinates | 1 | Make acceptance assert stable Scene ID uniqueness, allowing multiple source scenes at one CanonicalPlace candidate |
+| Mobile Phase 2 E2E searched for the context-only data disclosure while the map pane was active | 1 | Assert the map first, switch to the mobile itinerary-information tab for completeness, then return to the map for evidence capture |
 | Duplicate goal creation rejected because this task already had an active goal | 1 | Retrieved and continued the existing goal |
 | PowerShell decoded UTF-8 Chinese handoff text with the legacy console encoding | 1 | Re-read handoff files explicitly with `-Encoding UTF8` |
 | Initial `conda env create` exceeded the 120-second command budget without emitting an error | 1 | Inspect partial environment state, then use a bounded alternative instead of repeating blindly |
@@ -139,9 +264,73 @@ Complete — Phase 7 map correction verified and all four Compose services healt
 | Initial Phase 7 planning patch matched mojibake text from a legacy console read instead of the UTF-8 file | 1 | Re-read the planning file with explicit UTF-8 and patch the real Unicode text |
 | Phase 7 focused lint rejected exported non-components in `App.tsx` and one Vitest asymmetric matcher typed as `any` | 1 | Move map configuration to a dedicated typed module and replace the matcher with narrowed exact assertions |
 | In-app Browser runtime initialization twice failed with `Cannot redefine property: process` even after a fresh kernel reset | 2 | Stop repeating the plugin failure; use the passing repository Playwright desktop/mobile run plus its fresh screenshots for visual verification |
+| First Anitabi audit-correction patch matched report rows in the wrong order | 1 | Inspect the exact report/finding lines and apply smaller file-specific corrections |
+| First official Anitabi documentation open call had a malformed JavaScript quote | 1 | Use the direct official documentation URL in a corrected bounded open call |
+| Combined Anitabi count update patch used progress sections in the wrong order | 1 | Apply the findings and progress corrections as independent patches with local context |
+| Anitabi design finding patch omitted the blank/table-header context under `Technical Decisions` | 1 | Patch after the exact table header instead of matching a non-adjacent first decision row |
+| Second Anitabi decision insertion again combined the heading with a non-adjacent row | 2 | Match only the existing decision row and insert directly before it |
+| First focused Anitabi static pass found one 101-character line and two import-order findings | 1 | Apply narrow formatting/import fixes, then rerun tests, Ruff, and mypy with all results preserved |
+| Focused Anitabi tests and Ruff passed; mypy rejected the fallback's `Any` primary return | 1 | Replace `Any` with a typed point-Provider protocol and rerun mypy/tests |
+| MCP client Ruff passed; mypy inferred the first fixture branch's concrete result type across all branches | 1 | Annotate the shared fixture result as Pydantic `BaseModel` before branch assignment |
+| First integrated graph static pass found one unused import, one long line, and optional confirmation IDs not narrowed by `all()` | 1 | Apply explicit local-ID `None` checks and narrow formatting fixes |
+| First API workflow integration patch included a non-adjacent SQLAlchemy import context | 1 | Inspect exact API import/runtime/response sections and patch them independently |
+| Legacy graph tests reached the new explicit-requirement guard and failed four old placeholder assumptions | 1 | Rewrite them as async integrated-flow tests with structured confirmations and real fixture MCP results; preserve only Day 2 hash on injected replan |
+| First Phase 13 planning update used a heading that did not exist in `findings.md` | 1 | Re-read the exact planning-file tails and patch against stable nearby text |
+| First Phase 13 conversation static pass found intentional Chinese punctuation, two long lines, and two string literals treated as enums | 1 | Add a file-scoped punctuation exception, wrap the strings, and use the literal values directly |
+| Phase 13 API static pass found only import ordering and punctuation/line wrapping after mypy passed | 1 | Apply Ruff's mechanical import sort and narrow user-facing string fixes |
+| Direct mypy invocation on one new test path treated the editable local package as an untyped installed dependency | 1 | Keep source mypy clean and use the repository-configured full `mypy` gate for test typing |
+| Web conversation reload test matched both the prompt shortcut and the recovered user message | 1 | Assert the intentional pair of visible elements; the transcript recovery itself succeeded |
+| First Compose conversation E2E timed out before a late HTTP 200 because an obvious local modification still consulted the configured LLM | 1 | Route recognized deterministic intents before LLM synthesis and await the message response explicitly in E2E |
+| A focused command accidentally passed the TypeScript Playwright spec to Python Ruff | 1 | Ignore the irrelevant parser output and use the existing ESLint/TypeScript gates for Web files |
+| Phase-gate inspection attempted a nonexistent phase-specific script filename | 1 | Read the actual centralized `scripts/gate.py` definitions instead |
+| Optional in-app Browser bootstrap again failed before creating `agent` with `Cannot redefine property: process` | 3 | Stop retrying and retain the passing repository Playwright desktop/mobile acceptance as visual evidence |
+| Full remediation browser acceptance exposed base-to-every-point distance being charged as daily walking, leaving only one visit | 1 | Separate inter-area access time from area-local walking; the real three-day workspace now schedules 36 of 96 canonical places |
+| A structured omission used an invalid `access_limit` enum value | 1 | Use the existing truthful `unreachable` code and add focused coverage |
+| Reloading a pending date PlanPatch failed because persisted ISO text selected the string union branch | 1 | Normalize persisted start/end date values before PlanPatch validation and add reload coverage |
+| First aggregate remediation run found the compatibility heading exposed `Route A` before subject confirmation | 1 | Rename the compatibility section while retaining the confirmed Route A heading; desktop/mobile Phase 2 E2E passed |
+| Second aggregate remediation run found legacy Route B used fixture IDs while Route A used live Anitabi IDs | 1 | Make Route B use the configured point Provider, bound its matrix candidates to 49, and restore explicit omissions for the full Route A set |
+| The initial final aggregate command used the system Python instead of the authorized environment | 1 | Prepend the authorized Conda environment and its Library/bin directory before running the canonical gate |
+| First scene-image patch referenced `providers/points.py` outside the source package | 1 | Correct the path to `src/pilgrimage_agent/providers/points.py` |
+| Corrected scene-image patch assumed a compact validation block that differs from the current formatter output | 2 | Inspect the exact normalization function and apply smaller file-specific hunks |
+| Combined selection/evidence UI patch matched a stale response-assignment context | 1 | Split helper, patch-preview, selection-state, and render changes into exact local hunks |
+| First Phase 15 lint pass rejected two full-width commas in a Python user-facing string | 1 | Use the repository's established ASCII punctuation convention in Python while retaining natural Chinese UI copy in TypeScript |
+| Second Phase 15 lint pass rejected stringifying an `unknown` patch target day | 1 | Narrow the target to a number and format it explicitly before building user-facing operation text |
+| Phase 15 Compose rebuild exceeded the two-minute shell wrapper timeout while Docker buffered output | 1 | Retry with plain progress and a longer bounded timeout, then inspect service health before browser tests |
+| Aggregate Phase 4 mobile E2E had a MapLibre marker intercept another overlapping marker | 1 | Use the accessible checkbox surface for batch selection and an explicit marker event for detail behavior; repeat the mobile test to rule out flakiness |
+| Phase 16 PowerShell inspection command had an unterminated quoted regex | 1 | Split the source read and use a simpler single-quoted `rg` expression instead of retrying the malformed command |
+| Phase 16 first Web lint pass rejected the MapLibre load listener promise and a missing highlight dependency | 1 | Treat the listener registration return value explicitly and separate marker highlighting from camera/map construction without suppressing Hook analysis |
+| In-app browser showed 21 marker elements but zero inside the map viewport | 1 | Import MapLibre's required base stylesheet; the custom elements then receive absolute positioning and all 21 desktop markers become visible |
+| Focused mobile foundation test expected the map empty state while the conversation tab was active | 1 | Switch to the mobile map tab before asserting its intentionally hidden panel |
+| Focused scene-detail test assumed episode references are only numbered episodes or unknown | 2 | Assert the scene evidence card itself because valid records can also identify CD or other non-episode material and may omit a source URL |
+| Phase 17 configuration search included nonexistent legacy Compose filenames | 1 | Keep the valid `compose.yaml` and `.env.example` results; restrict later searches to paths that exist |
+| Phase 17 style/test search returned exit 1 because the optional SubjectConfirmation test path had no direct match | 1 | Keep the valid style hits and inspect the component/API schemas directly instead of repeating the compound search |
+| Phase 17 combined import/config search used a malformed quoted regex after returning the file header | 1 | Add the visibly missing `json` import directly and use simple literal searches later |
+| First Phase 17 lint pass rejected the official full-width punctuation in `けいおん！` | 1 | Mark the exact official-title fixture with the existing narrow `RUF001` exemption |
+| Initial multi-season domain patch used stale hierarchical context and applied nothing | 1 | Split the domain, confirmation, scoring, and coverage changes into exact file-local patches |
+| First multi-season focused pass reached Web lint after 34 tests passed, then rejected generic request stringification | 1 | Reuse the test's narrowed string/URL/Request URL extraction before matching the confirmation call |
+| Multi-season strict typing inferred a search-result local across later fixture branches | 1 | Give the search and confirmed-subject results distinct local names so each boundary retains its concrete type |
+| First Phase 17 Compose parse rejected the default User-Agent's colon as an unquoted mapping value | 1 | Quote the complete environment interpolation in both API and MCP service mappings |
+| Phase 17 combined three-service rebuild exceeded the 60-second shell budget | 1 | Inspect images first; MCP finished, so rebuild only the stale API/Web images with a larger bounded budget |
+| First Phase 17 E2E passed desktop but asserted hidden context text on mobile | 1 | Open the mobile `行程信息` tab for the confirmation-count assertion, then return to the map tab for marker verification |
+| The first combined lint-fix patch contained a malformed hunk boundary | 1 | Reissue the exact code and error-log hunks without an empty trailing hunk marker |
+| Focused Web tests still expected the workspace ID after the UI intentionally removed it | 1 | Assert pending-patch recovery while explicitly asserting the diagnostic ID stays hidden |
+| Natural walking recovery copy introduced one full-width comma rejected by Python lint | 1 | Keep the message natural while using the repository's ASCII comma convention |
 
 ## Guardrails
 - Never expose `.env`, secrets, tokens, headers, cookies, or signed MCP URLs.
 - Never book, pay, deploy, publish, message externally, or create external resources without explicit authorization.
 - Use only the `anime-pilgrimage-agent` Conda environment and repository-scoped Docker resources.
 - Preserve unrelated changes and never use destructive Git commands.
+
+## Phase 21: planning recovery and latency
+
+- [x] Reproduce the current planning failure and identify database/checkpoint version drift.
+- [x] Rebase a stale planning checkpoint from the authoritative persisted workspace before resume.
+- [x] Add a regression for applying place changes before the first planning request.
+- [x] Profile the planning critical path and remove avoidable serialized/repeated work without weakening Agent review or constraints.
+- [x] Add focused latency/dispatch regressions and run Python/API static and targeted tests.
+- [x] Rebuild only the API service and verify the real planning-after-patch workspace.
+- [x] Record actual tests and any unverified live boundaries; commit and push the focused change.
+- [x] Integrate read-only flight/transit/place/weather facts into the authoritative Workspace graph with real Handoff lifecycle and bounded ProviderSnapshots.
+- [x] Correct the three-layer place/travel-area clustering and add ORS/transit calibration.
+- [x] Upgrade Planner/Validator to consume access windows, opening hours, weather risk, and real matrices.

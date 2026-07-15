@@ -1,35 +1,49 @@
 import { expect, test } from "@playwright/test";
 
-test("confirmed Route A becomes a validated three-day Route B", async ({ page }, testInfo) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: /整理旅行条件/ }).click();
-  await page.getByRole("button", { name: "确认并查看 Route A" }).click();
+import { captureEvidence } from "./screenshot-evidence";
+import { planWorkspace } from "./workspace-flow";
 
-  await expect(page.getByRole("heading", { name: "选择抵离交通与住宿基地" })).toBeVisible();
-  await page.getByRole("radio", { name: "选择去程 新干线" }).click();
-  await page.getByRole("radio", { name: "选择返程 新干线" }).click();
-  await page.getByRole("radio", { name: "选择基地 下北泽站周边" }).click();
-  await expect(page.getByRole("radio", { name: "选择基地 下北泽站周边" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  await page.getByRole("button", { name: /生成可执行 Route B/ }).click();
+test("planned map stays compact and opens scene-rich place details", async ({ page }, testInfo) => {
+  await planWorkspace(page);
 
-  const timeline = page.getByRole("region", { name: "Route B · 三日可执行时间轴" });
-  await expect(timeline.getByRole("heading", { name: "Route B · 三日可执行时间轴" })).toBeVisible();
-  await expect(timeline.getByText("ORS 道路估算")).toBeVisible();
-  await expect(timeline.getByText("下北泽站周边", { exact: true })).toBeVisible();
-  await expect(timeline.getByText(/DAY 01/)).toBeVisible();
-  await expect(timeline.getByRole("link", { name: /现场导航 1/ }).first()).toHaveAttribute(
-    "href",
-    /https:\/\/www\.google\.com\/maps\/dir\/\?api=1/,
-  );
+  const map = page.getByLabel(/巡礼地点地图，共 \d+ 个地点/u);
+  await expect(map).toBeVisible();
+  const mapBox = await map.boundingBox();
+  expect(mapBox).not.toBeNull();
+  expect(mapBox?.height).toBeLessThanOrEqual(testInfo.project.name.startsWith("mobile") ? 270 : 310);
+
+  const markers = map.locator(".mix-map-marker");
+  expect(await markers.count()).toBeGreaterThan(1);
+  const pointBrowser = page.locator(".mix-point-browser");
+  await pointBrowser.getByText(/浏览当前地点/u).click();
+  await pointBrowser.getByRole("button").first().click();
+  await expect(page.locator("#mix-place-detail-title")).toBeVisible();
+  await expect(page.locator(".mix-scene-grid article").first()).toBeVisible();
+  const sceneImage = page.locator(".mix-scene-grid img").first();
+  if (await sceneImage.count()) await expect(sceneImage).toHaveAttribute("src", /plan=h360/u);
+
+  await page.getByRole("button", { name: "批量选择" }).click();
+  const choices = page.getByRole("list", { name: "批量选择地点" }).getByRole("checkbox");
+  await choices.nth(0).check();
+  await choices.nth(1).check();
+  await expect(page.getByText("已选 2 个地点")).toBeVisible();
+  await page.getByRole("button", { name: "批量加入" }).click();
+  await expect(page.getByRole("dialog", { name: "应用这次修改？" })).toBeVisible();
+  await expect(page.getByText(/PlanPatch|invalidated|stable_refs/u)).toHaveCount(0);
+  await page.getByRole("button", { name: "取消" }).click();
 
   const screenshotName = testInfo.project.name.startsWith("mobile")
     ? "phase-3-mobile.png"
     : "phase-3-desktop.png";
-  await page.screenshot({
-    path: `../../artifacts/screenshots/${screenshotName}`,
-    fullPage: true,
-  });
+  await captureEvidence(page, testInfo, screenshotName);
+
+  if (testInfo.project.name.startsWith("mobile")) {
+    await page.getByRole("button", { name: "对话", exact: true }).click();
+  }
+  await page.getByRole("button", { name: "清空已安排行程" }).click();
+  await expect(page.getByText("地点已经整理好了，现在可以生成每天的行程。")).toBeVisible();
+  await page.getByRole("button", { name: "永久删除工作区" }).click();
+  await expect(page.getByRole("alert")).toContainText("无法撤销");
+  await page.getByRole("button", { name: "再次点击确认永久删除" }).click();
+  await expect(page.getByRole("button", { name: "开始规划" })).toBeVisible();
 });

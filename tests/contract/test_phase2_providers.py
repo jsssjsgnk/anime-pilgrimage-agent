@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+import json
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -15,10 +16,14 @@ from pilgrimage_agent.domain.models import (
     GeoCoordinate,
     MatrixQuery,
     PilgrimagePointQuery,
+    PlaceDetailsQuery,
+    PlaceFactsSearchQuery,
     PlaceSearchQuery,
     SubjectSearchQuery,
+    TransitRouteQuery,
     WeatherForecastQuery,
 )
+from pilgrimage_agent.providers.anitabi import AnitabiProvider
 from pilgrimage_agent.providers.bangumi import BangumiSubjectProvider
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.http import SafeHttpClient
@@ -90,6 +95,11 @@ async def test_bangumi_contract_supports_empty_and_success(items: list[dict[str,
         assert request.method == "POST"
         assert request.headers.get("user-agent") == "fixture-app/1.0"
         assert request.headers.get("authorization") == "Bearer fixture-credential"
+        assert json.loads(request.content) == {
+            "keyword": "Bocchi",
+            "sort": "match",
+            "filter": {"type": [2]},
+        }
         return json_response(request, {"data": items})
 
     http, client = transport_client("bangumi", handler)
@@ -104,6 +114,137 @@ async def test_bangumi_contract_supports_empty_and_success(items: list[dict[str,
         await client.aclose()
     assert len(result.candidates) == len(items)
     assert all(candidate.provenance.source_url for candidate in result.candidates)
+
+
+async def test_bangumi_public_search_does_not_require_a_token() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "authorization" not in request.headers
+        assert json.loads(request.content)["filter"] == {"type": [2]}
+        return json_response(
+            request,
+            {
+                "data": [
+                    {
+                        "id": 1424,
+                        "name": "けいおん！",  # noqa: RUF001 - official title
+                        "name_cn": "轻音少女",
+                    }
+                ]
+            },
+        )
+
+    http, client = transport_client("bangumi", handler)
+    provider = BangumiSubjectProvider(token=None, user_agent="fixture-app/1.0", http=http)
+    try:
+        result = await provider.fetch(SubjectSearchQuery(query="轻音少女", limit=5))
+    finally:
+        await client.aclose()
+    assert [candidate.subject_id for candidate in result.candidates] == ["1424"]
+
+
+async def test_anitabi_contract_fetches_complete_points_and_reuses_cache() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.method == "GET"
+        assert request.headers.get("user-agent") == "fixture-app/1.0"
+        if request.url.path.endswith("/lite"):
+            return json_response(
+                request,
+                {"id": 328609, "modified": 1_700_000_000_000, "pointsLength": 2},
+            )
+        return json_response(
+            request,
+            [
+                {
+                    "id": "point-a",
+                    "cn": "下北泽站口",
+                    "name": "下北沢駅前",
+                    "ep": 1,
+                    "s": 62,
+                    "geo": [35.6615, 139.6670],
+                    "image": "https://image.anitabi.cn/points/328609/point-a.jpg?plan=h160",
+                    "origin": "Official fixture source",
+                    "originURL": "https://example.org/source-a",
+                },
+                {
+                    "id": "point-b",
+                    "name": "Shelter",
+                    "ep": "OP",
+                    "geo": [35.6618, 139.6678],
+                },
+            ],
+        )
+
+    http, client = transport_client("anitabi", handler)
+    provider = AnitabiProvider(http=http, user_agent="fixture-app/1.0")
+    query = PilgrimagePointQuery(subject_id="328609", provider="anitabi")
+    try:
+        first = await provider.fetch(query)
+        second = await provider.fetch(query)
+    finally:
+        await client.aclose()
+    assert calls == 2
+    assert first == second
+    assert first.is_complete
+    assert len(first.points) == 2
+    assert first.points[0].source_label == "Official fixture source"
+    assert str(first.points[0].image_url).endswith("point-a.jpg?plan=h160")
+    assert str(first.points[0].provenance.source_url) == "https://example.org/source-a"
+    assert first.points[1].latitude == 35.6618
+    assert "OP" in first.points[1].episode_refs[0]
+
+
+async def test_anitabi_contract_marks_count_mismatch_and_invalid_points_partial() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/lite"):
+            return json_response(request, {"id": 328609, "pointsLength": 3})
+        return json_response(
+            request,
+            [
+                {"id": "valid", "name": "Valid", "geo": [35.66, 139.66]},
+                {"id": "invalid", "name": "Invalid", "geo": [135.66, 139.66]},
+            ],
+        )
+
+    http, client = transport_client("anitabi", handler)
+    provider = AnitabiProvider(http=http)
+    try:
+        result = await provider.fetch(
+            PilgrimagePointQuery(subject_id="328609", provider="anitabi")
+        )
+    finally:
+        await client.aclose()
+    assert not result.is_complete
+    assert len(result.points) == 1
+    assert any("screenshot-detail count" in warning for warning in result.warnings)
+    assert any("invalid Anitabi point" in warning for warning in result.warnings)
+
+
+async def test_anitabi_contract_discloses_documented_detail_subset() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/lite"):
+            return json_response(
+                request,
+                {"id": 328609, "pointsLength": 414, "imagesLength": 1},
+            )
+        return json_response(
+            request,
+            [{"id": "detailed", "name": "Detailed", "geo": [35.66, 139.66]}],
+        )
+
+    http, client = transport_client("anitabi", handler)
+    try:
+        result = await AnitabiProvider(http=http).fetch(
+            PilgrimagePointQuery(subject_id="328609", provider="anitabi")
+        )
+    finally:
+        await client.aclose()
+    assert not result.is_complete
+    assert len(result.points) == 1
+    assert any("414 total map points" in warning for warning in result.warnings)
 
 
 async def test_ors_contract_uses_longitude_latitude_and_normalizes_all_outputs() -> None:
@@ -263,6 +404,163 @@ async def test_searchapi_contract_never_sends_credential_in_query_or_follows_boo
     assert flights.options[0].segments[0].departure_at.hour == 9
     assert "must-not-be-returned" not in flights.model_dump_json()
     assert calendar.candidates[0].price == 19000
+
+
+async def test_searchapi_transit_normalizes_steps_times_and_never_exposes_booking() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.url.params["engine"] == "google_maps_directions"
+        assert request.url.params["travel_mode"] == "transit"
+        assert request.url.params["route"] == "fewer_transfers"
+        assert request.url.params["prefer"] == "train,subway"
+        assert "api_key" not in request.url.params
+        return json_response(
+            request,
+            {
+                "directions": [
+                    {
+                        "time_window": {
+                            "depart_at": "9:00 AM",
+                            "depart_at_tz": "Asia/Tokyo",
+                            "arrive_at": "9:42 AM",
+                            "arrive_at_tz": "Asia/Tokyo",
+                        },
+                        "distance": {"value": 12000},
+                        "buy_ticket": "must-not-be-returned",
+                        "directions": [
+                            {
+                                "travel_mode": "Walking",
+                                "origin": "Shinjuku",
+                                "destination": "Fixture Station",
+                                "duration": {"value": 420},
+                                "distance": {"value": 520},
+                            },
+                            {
+                                "travel_mode": "Transit",
+                                "duration": {"value": 1920},
+                                "transit_details": {
+                                    "depart_from": {
+                                        "place": "Fixture Station",
+                                        "at": "9:10 AM",
+                                        "timezone": "Asia/Tokyo",
+                                    },
+                                    "arrive_at": {
+                                        "place": "Shimokitazawa",
+                                        "at": "9:42 AM",
+                                        "timezone": "Asia/Tokyo",
+                                    },
+                                    "vehicle": "train",
+                                    "line_name": "Fixture Line",
+                                    "line_number": "F1",
+                                    "stops": [
+                                        {
+                                            "place": "Shimokitazawa",
+                                            "at": "9:42 AM",
+                                            "timezone": "Asia/Tokyo",
+                                        }
+                                    ],
+                                },
+                            },
+                        ],
+                    }
+                ]
+            },
+        )
+
+    http, client = transport_client("searchapi", handler)
+    provider = SearchApiFlightProvider(api_key="fixture-credential", http=http)
+    query = TransitRouteQuery(
+        origin="Shinjuku",
+        destination="Shimokitazawa",
+        at=datetime.fromisoformat("2030-02-01T09:00:00+09:00"),
+        route="fewer_transfers",
+        prefer=("train", "subway"),
+    )
+    try:
+        first = await provider.transit(query)
+        second = await provider.transit(query)
+    finally:
+        await client.aclose()
+    assert calls == 1
+    assert first == second
+    assert first.options[0].duration_seconds == 2520
+    assert first.options[0].walking_seconds == 420
+    assert first.options[0].steps[1].line_name == "Fixture Line"
+    assert first.options[0].steps[1].stops[0].at is not None
+    assert "must-not-be-returned" not in first.model_dump_json()
+
+
+async def test_searchapi_place_search_requires_id_before_exact_details() -> None:
+    engines: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        engine = request.url.params["engine"]
+        engines.append(engine)
+        assert "api_key" not in request.url.params
+        if engine == "google_maps":
+            assert request.url.params["q"] == "下北沢駅"
+            assert request.url.params["ll"].startswith("@35.6615,139.667")
+            return json_response(
+                request,
+                {
+                    "local_results": [
+                        {
+                            "place_id": "fixture-place",
+                            "data_id": "fixture-data",
+                            "title": "下北沢駅",
+                            "address": "東京都世田谷区",
+                            "gps_coordinates": {
+                                "latitude": 35.6615,
+                                "longitude": 139.667,
+                            },
+                            "open_state": "Open",
+                            "open_hours": {
+                                "Monday": ["9:00 AM-6:00 PM"],
+                                "Tuesday": ["Closed"],
+                            },
+                        }
+                    ]
+                },
+            )
+        assert request.url.params["place_id"] == "fixture-place"
+        return json_response(
+            request,
+            {
+                "place_result": {
+                    "place_id": "fixture-place",
+                    "data_id": "fixture-data",
+                    "title": "下北沢駅",
+                    "address": "東京都世田谷区",
+                    "gps_coordinates": {"latitude": 35.6615, "longitude": 139.667},
+                    "business_status": "OPERATIONAL",
+                }
+            },
+        )
+
+    http, client = transport_client("searchapi", handler)
+    provider = SearchApiFlightProvider(api_key="fixture-credential", http=http)
+    try:
+        matches = await provider.search_places(
+            PlaceFactsSearchQuery(
+                query="下北沢駅",
+                coordinate_hint=GeoCoordinate(latitude=35.6615, longitude=139.667),
+            )
+        )
+        details = await provider.place_details(
+            PlaceDetailsQuery(place_id=matches.candidates[0].place_id)
+        )
+    finally:
+        await client.aclose()
+    assert engines == ["google_maps", "google_maps_place"]
+    assert matches.candidates[0].match_confidence == 1
+    assert matches.candidates[0].opening_windows[0].opens_at is not None
+    assert matches.candidates[0].opening_windows[1].opens_at is None
+    assert matches.candidates[0].opening_windows[1].raw_text == "Closed"
+    assert details.candidates[0].match_confidence == 1
+    assert details.candidates[0].temporarily_closed is False
 
 
 def test_imported_points_drop_invalid_and_route_a_deduplicates_with_sources(tmp_path: Any) -> None:

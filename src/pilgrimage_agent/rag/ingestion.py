@@ -70,10 +70,13 @@ def ingest_document(
         content_is_base64=request.content_is_base64,
     )
     content_hash = sha256(extracted.text.encode()).hexdigest()
+    resolved_namespace = namespace or authorized_namespace(request)
     document = KnowledgeDocument(
         document_id=document_id
-        or UUID(bytes=sha256(f"{namespace}:{content_hash}".encode()).digest()[:16]),
-        namespace=namespace or authorized_namespace(request),
+        or UUID(
+            bytes=sha256(f"{resolved_namespace}:{content_hash}".encode()).digest()[:16]
+        ),
+        namespace=resolved_namespace,
         owner_user_id=request.owner_user_id,
         trip_id=request.trip_id,
         title=request.title,

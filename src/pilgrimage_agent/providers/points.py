@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import unicodedata
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
-from uuid import NAMESPACE_URL, uuid5
+from typing import Any, Protocol
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -23,6 +22,10 @@ from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.common import provenance
 
 _DICT = TypeAdapter(dict[str, Any])
+
+
+class PilgrimagePointProvider(Protocol):
+    async def fetch(self, query: PilgrimagePointQuery) -> PilgrimagePointResult: ...
 
 
 class ImportedPilgrimagePointProvider:
@@ -132,6 +135,9 @@ class ImportedPilgrimagePointProvider:
         refs = data.get("episode_refs", [])
         if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
             raise ValueError
+        image_url = data.get("image_url")
+        if not isinstance(image_url, str) or not image_url.startswith(("http://", "https://")):
+            image_url = None
         confidence = data.get("confidence", "community")
         return PilgrimagePoint(
             id=uuid5(NAMESPACE_URL, stable_key),
@@ -140,6 +146,7 @@ class ImportedPilgrimagePointProvider:
             latitude=latitude,
             longitude=longitude,
             episode_refs=tuple(refs),
+            image_url=image_url,
             confidence=confidence,
             provenance=DataProvenance.model_validate(
                 {**result_provenance.model_dump(), "source_url": source_url}
@@ -158,12 +165,46 @@ class FixturePilgrimagePointProvider(ImportedPilgrimagePointProvider):
         )
 
 
-def build_route_a(result: PilgrimagePointResult, *, subject_id: str) -> RouteA:
-    """Clean and deduplicate sourced points without deleting unique valid candidates."""
+class FallbackPilgrimagePointProvider:
+    """Use a legal import only when the primary read-only point Provider fails."""
 
-    seen: set[tuple[str, float, float]] = set()
+    provider = "anitabi-with-import-fallback"
+
+    def __init__(
+        self,
+        primary: PilgrimagePointProvider,
+        fallback: ImportedPilgrimagePointProvider,
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    async def fetch(self, query: PilgrimagePointQuery) -> PilgrimagePointResult:
+        try:
+            return await self.primary.fetch(query)
+        except ProviderError as error:
+            if error.kind is ProviderErrorKind.VALIDATION:
+                raise
+            imported = await self.fallback.fetch(
+                query.model_copy(update={"provider": "imported"})
+            )
+            return imported.model_copy(
+                update={
+                    "is_complete": False,
+                    "warnings": (
+                        f"Anitabi {error.kind.value}; used configured legal import fallback.",
+                        *imported.warnings,
+                    ),
+                }
+            )
+
+
+def build_route_a(result: PilgrimagePointResult, *, subject_id: str) -> RouteA:
+    """Keep every sourced scene ID while rejecting exact duplicate records."""
+
+    seen: set[UUID] = set()
     points: list[PilgrimagePoint] = []
     warnings = list(result.warnings)
+    original_warning_count = len(warnings)
     for point in result.points:
         if point.subject_id != subject_id:
             warnings.append(f"Excluded point {point.id}: subject mismatch.")
@@ -171,17 +212,15 @@ def build_route_a(result: PilgrimagePointResult, *, subject_id: str) -> RouteA:
         if point.provenance.source_url is None:
             warnings.append(f"Excluded point {point.id}: missing source URL.")
             continue
-        normalized_name = unicodedata.normalize("NFKC", point.name).casefold().strip()
-        key = (normalized_name, round(point.latitude, 5), round(point.longitude, 5))
-        if key in seen:
+        if point.id in seen:
             warnings.append(f"Removed duplicate point {point.id}.")
             continue
-        seen.add(key)
+        seen.add(point.id)
         points.append(point)
     return RouteA(
         subject_id=subject_id,
         points=tuple(points),
-        is_complete=result.is_complete,
+        is_complete=result.is_complete and len(warnings) == original_warning_count,
         warnings=tuple(warnings),
     )
 
@@ -220,6 +259,28 @@ FIXTURE_POINTS: dict[str, Any] = {
                 "episode_refs": ["第2话"],
                 "confidence": "community",
                 "source_url": "https://www.shimokita1ban.com/",
+            },
+        },
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [139.66844, 35.66215]},
+            "properties": {
+                "subject_id": "364450",
+                "name": "下北泽站东口",
+                "episode_refs": ["第3话"],
+                "confidence": "community",
+                "source_url": "https://www.odakyu.jp/station/shimo_kitazawa/",
+            },
+        },
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [139.70163, 35.68124]},
+            "properties": {
+                "subject_id": "364450",
+                "name": "锦糸公园周边",
+                "episode_refs": ["第5话"],
+                "confidence": "community",
+                "source_url": "https://www.city.sumida.lg.jp/",
             },
         },
     ],

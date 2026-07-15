@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -38,6 +39,15 @@ class ProjectStore(Protocol):
     async def get_trip(
         self, owner_user_id: str, thread_id: str, trip_id: UUID
     ) -> StoredTrip | None: ...
+
+    async def delete_trip(
+        self,
+        owner_user_id: str,
+        thread_id: str,
+        trip_id: UUID,
+        *,
+        checkpoint_thread_id: str | None = None,
+    ) -> bool: ...
 
     async def append_event(
         self, owner_user_id: str, trip_id: UUID, event_type: str, payload: dict[str, object]
@@ -89,6 +99,25 @@ class InMemoryProjectStore:
             return trip
         return None
 
+    async def delete_trip(
+        self,
+        owner_user_id: str,
+        thread_id: str,
+        trip_id: UUID,
+        *,
+        checkpoint_thread_id: str | None = None,
+    ) -> bool:
+        del checkpoint_thread_id
+        trip = self.trips.get(trip_id)
+        if trip is None or (trip.owner_user_id, trip.thread_id) != (
+            owner_user_id,
+            thread_id,
+        ):
+            return False
+        del self.trips[trip_id]
+        self.events.pop(trip_id, None)
+        return True
+
     async def append_event(
         self, owner_user_id: str, trip_id: UUID, event_type: str, payload: dict[str, object]
     ) -> StoredEvent:
@@ -101,6 +130,7 @@ class InMemoryProjectStore:
             owner_user_id=owner_user_id,
             event_type=event_type,
             payload=payload,
+            created_at=datetime.now(UTC),
         )
         self.events[trip_id].append(event)
         return event
@@ -191,6 +221,36 @@ class SqlProjectStore:
             state=record.state,
         )
 
+    async def delete_trip(
+        self,
+        owner_user_id: str,
+        thread_id: str,
+        trip_id: UUID,
+        *,
+        checkpoint_thread_id: str | None = None,
+    ) -> bool:
+        """Delete one namespaced trip and its graph state in one DB transaction."""
+
+        async with self.sessions.begin() as session:
+            record = await session.scalar(
+                select(TripRecord).where(
+                    TripRecord.id == trip_id,
+                    TripRecord.owner_user_id == owner_user_id,
+                    TripRecord.thread_id == thread_id,
+                )
+            )
+            if record is None:
+                return False
+            if checkpoint_thread_id is not None:
+                params = {"thread_id": checkpoint_thread_id}
+                for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+                    await session.execute(
+                        text(f"DELETE FROM {table} WHERE thread_id = :thread_id"),  # noqa: S608
+                        params,
+                    )
+            await session.delete(record)
+        return True
+
     async def append_event(
         self, owner_user_id: str, trip_id: UUID, event_type: str, payload: dict[str, object]
     ) -> StoredEvent:
@@ -210,12 +270,14 @@ class SqlProjectStore:
             )
             session.add(record)
             await session.flush()
+            await session.refresh(record, attribute_names=["created_at"])
             return StoredEvent(
                 event_id=record.id,
                 trip_id=trip_id,
                 owner_user_id=owner_user_id,
                 event_type=event_type,
                 payload=payload,
+                created_at=record.created_at,
             )
 
     async def list_events(self, owner_user_id: str, trip_id: UUID) -> Sequence[StoredEvent]:
@@ -237,6 +299,7 @@ class SqlProjectStore:
                 owner_user_id=record.owner_user_id,
                 event_type=record.event_type,
                 payload=record.payload,
+                created_at=record.created_at,
             )
             for record in records
         )

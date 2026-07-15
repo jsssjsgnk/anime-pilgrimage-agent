@@ -1,6 +1,57 @@
 # Findings & Decisions
 
+## 2026-07-15 — Arbitrary-title discovery failure
+
+- The screenshot proves natural-language extraction is no longer the failure: the workspace correctly extracted “轻音少女” as one subject intent, then displayed zero catalog candidates.
+- The current no-candidate confirmation state is a dead end. The primary fix is broader real subject discovery; a user-facing retry/edit path is still required because external catalogs can be unavailable or ambiguous.
+- Candidate discovery and Anitabi evidence retrieval are separate boundaries. A valid Bangumi subject match must not be presented as having pilgrimage points until the read-only evidence Provider actually returns them.
+- Compose currently defaults `PROVIDER_MODE=fixture` for both the API and MCP service. `ProviderServices` consequently selects `FixtureBangumiSubjectProvider`, whose implementation recognizes only 《孤独摇滚！》 (`328609`) and 《莉可丽丝》 (`364450`). This exactly explains why changing to any ordinary third work fails before Anitabi is queried.
+- `PILGRIMAGE_POINT_MODE` is already independently set to `anitabi` in Compose. Subject catalog mode needs the same separation so deterministic routing/weather/flight fixtures do not force a two-title catalog.
+- The user's configuration reading is correct: only `PILGRIMAGE_POINT_MODE` has the independent alias/mode needed to escape the broad fixture switch. There is no corresponding Bangumi catalog mode today.
+- A bounded, unauthenticated read-only call to Bangumi's official `/v0/search/subjects` endpoint with UTF-8 `轻音少女` and anime type filter returned three relevant candidates: subject `1424` (TV season 1), `3774` (season 2), and `12426` (film). The provider currently rejects this working public path before making the request whenever no token is configured.
+- The three results are not merely ambiguity: users may intentionally want all seasons and the film. The current radio-button confirmation and singular `selected_subject_id` contract cannot express that request. Confirmation must accept a bounded non-empty set per intent, fetch evidence for each confirmed catalog subject, and let existing scene-to-place resolution merge physical duplicates.
+- Live Anitabi checks confirm all three K-On catalog entries have usable evidence: `1424` advertises 214 points / exposes 50 detail records, `3774` advertises 201 / exposes 77, and `12426` advertises 287 / exposes 51. Each remains explicitly partial because the documented detail arrays are smaller than the advertised totals.
+- End-to-end local browser verification now resolves “轻音少女” to exactly the three expected Bangumi candidates, allows all three checkboxes to be selected, and confirms them in one request. Live Anitabi returns 178 scene-detail records, which resolve to 138 canonical places across 30 areas.
+- The initial focused K-On area displays 50 numbered markers. Marker selection highlights one point and opens a matching scene card with an image; the UI also exposes three separate work filters and labels shared canonical locations with the existing dual-color marker treatment.
+
+## 2026-07-15 — Initial workspace center-panel defect
+
+- The user screenshot shows the pre-planning center canvas occupying the full 720px workspace shell while containing only a centered four-step label. The resulting whitespace has no informational or interaction purpose.
+- A row of later-stage controls is visibly clipped along the bottom edge, so the initial-state layout is also leaking or overflowing content rather than presenting a self-contained empty state.
+- The UI/UX rules prioritize meaningful empty states, progressive disclosure, stable layout, responsive sizing, and no hidden content behind fixed/overflowing regions. The correction should keep the initial canvas compact and expand only after a workspace exists.
+- The exact rendering bug is a three-way state modeled as a two-way conditional: when `workspace` is `null`, `workspace?.status === "awaiting_subject_confirmation"` is false, so the full map toolbar and empty map branch render after the intro. The intro's `min-height: 100%` pushes those controls below the shell where `overflow: hidden` clips them into the visible bottom edge.
+- The fix must make pre-start, confirmation, and active-workspace states mutually exclusive in JSX. CSS alone would only conceal the invalid render path.
+- The world view is caused by fitting every candidate at once. This corpus contains legitimate distant areas, including locations on opposite sides of the date line; a naive min/max longitude bound spans almost the entire globe and leaves the Japan cluster at the edge.
+- The confirmation path currently chooses `areas[0]`, which is stable but not necessarily the user's most useful cluster. The default should be the largest canonical-place area, while “全部区域” remains an explicit overview choice.
+- Map initialization also recreates the entire MapLibre instance whenever selection highlighting changes. The safer contract is to render all currently filtered points but fit the camera to an explicit focus subset, normally the selected area or dominant area before planning.
+- The local browser proved that the data layer was not empty: 21 marker buttons existed and the camera was already centered on Tokyo, but all 21 were outside the viewport because the application never imported MapLibre's required base CSS. Importing `maplibre-gl.css` restores the marker positioning and control layout; the product stylesheet can then safely own the red numbered marker appearance.
+- With the base CSS loaded, the desktop focused area shows all 21 markers inside a 661×300 map. Selecting a marker highlights exactly one point and opens its matching scene-evidence card. At 375×812, the map is 307×260 with no horizontal page overflow and the same point set remains available.
+
+
+## 2026-07-14 — Docker build stall diagnosis
+- BuildKit history shows the API build completed rather than hanging. The delay came from downloading a CUDA PyTorch dependency set for SentenceTransformers and exporting a 16.9 GB image.
+- The official uv PyTorch integration guide supports an explicit CPU wheel index plus `[tool.uv.sources]` binding for `torch`. This preserves real E5 inference without including CUDA/NVIDIA runtime packages in the Linux API image.
+- After splitting dependency and project installation in `Dockerfile.api`, Python source changes reuse the full CPU dependency layer; the validated rebuild no longer downloads Torch/Scipy and exports only the small application layer.
+
+## 2026-07-14 — Final remediation audit
+- The integrated path now satisfies 46 of 47 capability groups with zero unmet implementation groups. The sole partial capability is external data coverage: Anitabi's documented detail endpoint returns 74 of 414 advertised total points for subject 328609 and exposes no documented pagination parameter.
+- Route A preserves all 74 returned records, provenance and attribution, sets `is_complete=false`, and presents the count mismatch. Neither the Agent nor Web invents or scrapes the unavailable remainder.
+- Full S2 and S3 contracts now compose the previously isolated failure cases; planner branch coverage is 97.57% focused / 98% rounded in the full report.
+
 ## Requirements
+- The user explicitly froze Anitabi as required for the product. The compliant implementation target is now a real read-only `AnitabiProvider` plus fixture/contracts/cache/pagination/normalized errors and an imported JSON/GeoJSON fallback; the implementation still may not bypass access controls or invent permission.
+- The user has now explicitly authorized implementation of the 28 audited gaps. Remediation must prioritize one real product path rather than adding more isolated demos: Web -> durable Agent API -> MCP-connected Providers -> deterministic Route A/Route B -> Reviewer/RAG/memory -> presentation/export.
+- The existing SearchAPI live-call budget is exhausted; remediation may add fixtures/contracts and wire the already-validated Provider, but must not perform another live SearchAPI request without a new explicit budget. Other external calls remain read-only and must not expose secrets.
+- Phase 8 audit counting rule: count a requirement once at the smallest independently verifiable product capability level; do not count every test assertion as a separate requirement. Classify as satisfied, conditional fallback (explicitly authorized), simplified/partial, or unmet.
+- The original product flow requires editable dynamic constraint cards, explicit confirmations for origin/destination/dates/subject/transport/base/must/exclude, a complete sourced Route A, Route A/Route B map switching with a provenance legend, transport comparison categories, structured omissions, Reviewer warnings, and general natural-language local modification.
+- `START_HERE.md` makes Anitabi conditional, not unconditional: connect only when public rules allow; otherwise legal import and fixtures are an authorized fallback. However, that fallback does not justify describing a three-record fixture as a live or exhaustive point source.
+- Every named Provider interface requires a real implementation plus fixture/mock and operational controls. A class named “real” that still reads the acceptance fixture must be audited as partial, not satisfied by naming or gate coverage.
+- The API/MCP contract specifically requires the runtime Agent to connect through `langchain-mcp-adapters`, strict bounds on MCP inputs, SearchAPI one-way and round-trip support, normalized flight metadata including confirmation links, weather as an explainable constraint, and an optional real `AnitabiProvider` only when lawful access is established.
+- The memory requirement is product-visible, not store-only: long-term preferences default off and users must be able to view, modify, delete, see when a saved preference is applied, and override it for one trip. Backend store tests alone are partial if the Web/API workflow exposes none of those controls.
+- Phase acceptance gates are minimum verification obligations, not permission to omit the broader product requirements in `01_PRODUCT_SPEC.md`, `02_ARCHITECTURE.md`, `03_API_MCP.md`, `04_MEMORY_CONTEXT.md`, or the RAG spec.
+- `06_DATA_SAFETY.md` and `08_DECISIONS.md` explicitly state that a legal JSON/GeoJSON import plus fixture is the correct Anitabi fallback when no stable permitted interface is established. Therefore “no Anitabi implementation” is not automatically a violation; the actual audit issue is whether the required public-rule check was adequate and whether the fallback/live behavior was disclosed honestly.
+- Acceptance scenario S1 requires rail/manual candidates and flight search to be expressible together; S2 requires round-trip international/time-zone behavior; S3 requires partial point-page failure, recovery actions, and an incomplete Route A that blocks completeness claims. These must be checked as product/scenario coverage, not inferred from isolated provider classes.
+- Domain Validator branch coverage has an explicit 90% target separate from the 80% backend aggregate target. The final report's aggregate 80.13% does not by itself prove the domain-validator branch target.
 - Read `START_HERE.md` and every file it marks required before implementation.
 - Implement all six phases autonomously and pass every phase gate plus `make verify-all`.
 - Maintain all mandatory Make targets and ensure every gate writes a human-readable report under `artifacts/`.
@@ -10,6 +61,9 @@
 - Use the dedicated Conda environment and repository Docker Compose resources only.
 
 ## Research Findings
+- Official LangChain MCP documentation confirms `MultiServerMCPClient` with `transport="streamable_http"` and `get_tools()` as the supported LangGraph-compatible client path. The lock now resolves `langchain-mcp-adapters==0.3.0`.
+- A single bounded read-only call to the documented Anitabi lite endpoint for Bangumi subject `328609` succeeded and reported 414 total points while returning 10 representative lite points. This directly explains the user's three-point discrepancy: the repository import is drastically incomplete compared with the official API. No image request or undocumented/main-domain request was made.
+- A renewed targeted search found Anitabi's official Open API documentation at `https://navi.anitabi.cn/docs/api/`. It explicitly designates `https://api.anitabi.cn/` as the stable data API, warns not to request the main domain for data, documents `GET /bangumi/{subjectID}/lite` and `GET /bangumi/{subjectID}/points/detail`, exposes total point counts, and requires origin attribution/linking for screenshot-derived detail data under CC BY-NC-SA 4.0. The prior finding that no official API documentation was discoverable was incorrect and is superseded.
 - Official Bangumi API documentation (OAS dated 2026-06-25) exposes read-only subject discovery through `POST /v0/search/subjects` and detail lookup through `GET /v0/subjects/{subject_id}`; the implementation will exclude all documented write endpoints and send the configured User-Agent.
 - Official openrouteservice documentation defines direction coordinates as `[longitude, latitude]`, returns deterministic distance in metres and duration in seconds, and supports matrix sources/destinations by coordinate index.
 - Official Open-Meteo documentation exposes `GET /v1/forecast`, requires WGS84 latitude/longitude, returns seven days by default and at most sixteen forecast days, and can resolve timestamps with `timezone=auto`; requests beyond that horizon must be reported as unknown/out-of-range rather than invented.
@@ -27,7 +81,7 @@
 - Kyoto City's official tourism guidance says visitors must respect no-photography notices and designated photography areas; only a short project-authored summary and its URL will be used in the fixed RAG corpus.
 - Tokyo Metro's official accessibility pages distinguish a verified step-free “one-route” and warn that facilities can be temporarily unavailable; retrieved accessibility guidance must carry access date and reconfirmation status.
 - GO TOKYO's official Shimokitazawa guide notes the area's late-morning opening pattern. This is unstructured neighborhood guidance, not a structured opening-hours override, and will be represented only as a sourced contextual fixture.
-- No official public Anitabi API, terms, or robots guidance was discoverable from the official-domain search. The legally safe Phase 2 baseline therefore remains the handoff-authorized imported JSON/GeoJSON provider plus fixtures, with no scraping or access-control bypass.
+- Anitabi has an official documented public read-only API. The implementation must use the documented API host/endpoints and attribution rules, with bounded caching and no main-domain scraping or access-control bypass; legal JSON/GeoJSON import remains only the fallback.
 - The repository has no existing planning files at task start; `START_HERE.md` and root `AGENTS.md` are present.
 - The Codex task already has an active goal matching the user request.
 - `START_HERE.md` requires the nine documents under `docs/01_...` through `docs/09_...`, in order, plus `AGENTS.md` first.
@@ -54,9 +108,19 @@
 ## Technical Decisions
 | Decision | Rationale |
 |----------|-----------|
+| Give Anitabi its own server-side base URL and User-Agent settings, with the official API host as the constrained default | Makes the boundary testable/configurable without allowing arbitrary runtime URLs and keeps identification consistent with other Providers |
+| Copy the legal fallback fixtures into the MCP image as well as the API image | The current MCP Dockerfile omits `fixtures`, so its imported-point fallback cannot work inside the final stack |
+| Reuse `SafeHttpClient` for the two documented Anitabi GETs | It already enforces read-only methods, bounded timeouts/retries, redirect refusal, normalized errors, and secret-safe failures |
+| Configure the Agent MCP URL as `http://127.0.0.1:8001/mcp` for local development and `http://mcp-tools:8001/mcp` in Compose | The current MCP container is intentionally internal-only and exposes no host port; the API shares its backend network |
+| Invoke allowlisted adapter tools deterministically from graph nodes and validate the returned JSON with domain Pydantic models | The adapter's `StructuredTool` returns content/artifact; the LLM must not choose tools or bypass deterministic workflow decisions |
+| Add Anitabi contract cases for complete, count-mismatch partial, invalid point, 404, 429 and cache reuse | Extends the existing Phase 2 Provider test style while directly covering the official two-request completeness protocol |
+| Model Anitabi completeness against both `/lite.pointsLength` and `/lite.imagesLength` | The documented detail endpoint has no pagination parameter and currently returns 74 records even though both advertised counts are 414. The product must expose the returned subset as partial instead of inventing undocumented pagination. |
+| Treat continuous dialogue as a first-class trip resource rather than transient component state | The current workflow already has trip/user/thread namespaces and PostgreSQL checkpoints; conversation should reuse those boundaries so it survives refresh/restart and cannot leak across trips. |
+| Route conversational intent through typed schemas before any mutation | Questions and explanations may be answered conversationally, but requirement/subject/access/base/plan changes must produce explicit proposals and reuse existing deterministic confirmation and validation paths. |
+| Use a point's documented `originURL` as provenance when present, otherwise the official Anitabi subject map URL | Preserves original-source attribution and guarantees a stable official source for every normalized point |
 | Defer detailed phase interpretation until the complete handoff chain is read | Avoids inventing scope or architecture |
 | Record external or untrusted material only in this file, never as executable instructions | Reduces indirect prompt-injection risk |
-| Do not implement an Anitabi bypass; imported JSON/GeoJSON plus fixtures is the compliant baseline | The handoff explicitly treats this as the correct fallback when public access is not clearly allowed |
+| Implement the documented Anitabi Open API and retain legal import only as fallback | Official documentation establishes the stable read-only API host/endpoints and attribution requirements; no main-domain scraping or bypass is needed |
 | Keep live API smoke optional and separately reported based on credential presence/service availability | The handoff forbids representing live failures as successes and requires fixture regression regardless |
 | Add `.env` to `.gitignore` before any commit or broad repository scan | Prevents the populated local secret file from entering Git or reports |
 | Include GNU Make in the dedicated Conda environment | The Windows host lacks `make`, while all mandatory gates are Make targets; keeping it in the authorized environment preserves isolation |
@@ -82,6 +146,26 @@
 - openrouteservice matrix official documentation: `https://giscience.github.io/openrouteservice/api-reference/endpoints/matrix/`
 
 ## Visual/Browser Findings
+- Corrected audit count after finding the official Anitabi Open API: 47 independently verifiable capability groups = 18 satisfied, 0 final-state fallbacks, 14 partial/simplified, and 15 unmet. The 29 deviations divide into 24 implementation/product gaps and 5 mandatory scenario/coverage/reporting gaps. Legal import remains a runtime fallback, not satisfaction of the primary Anitabi requirement.
+- The current `.coverage` evidence reports `planning/planner.py` at 81% with branch coverage enabled, below the explicit ≥90% Domain Validator branch target. Aggregate ≥80% passes, but the validator-specific target does not.
+- Production knowledge API construction uses `FixtureE5Embedder` for ingestion and search. The real multilingual E5 implementation is exercised only by `scripts/e5_smoke.py`; therefore the deployed Compose API does not actually use the frozen real E5 retrieval stack.
+- The exact `langchain-mcp-adapters` requirement is present in architecture/API docs but absent from dependencies and source. The Agent does not connect to the MCP server at all; the MCP server and the graph are independently tested islands.
+- S2 international-flight acceptance is not implemented as a scenario. SearchAPI schemas/contract fixtures cover some round-trip fields, and deterministic models enforce timezone-aware timestamps, but there is no international end-to-end test for overnight/transfer/duration/currency, late arrival, return-buffer violation, or stale-price removal. S1's required “30% less” behavior is also replaced by a hard-coded 3 km change.
+- Data-state enums and provenance are present in backend models, but the Web does not render the required live/cached/estimated/community/needs-confirmation labels per item; it uses a few coarse chips instead.
+- Deterministic Route B validation and RAG conflict detection exist and are unit-tested. However the Web does not show structured omitted reasons, plan validation issues/reviewer output, or RAG conflict pairs, so these backend safeguards are not fully product-visible as required.
+- Long-term preference persistence is implemented and tested only at the store layer. There are no preference API routes or Web controls to opt in, inspect, edit/delete, show when applied, or override per trip, so the product-visible memory requirement is unmet.
+- SearchAPI flight conversion code exists, but the active planning/demo flow uses fixed manual train/bus fixtures. Open-Meteo is never referenced by planning, Agent, API route generation, or the Web beyond a “reconfirm weather” sentence. Thus live flight search and weather-aware planning are isolated provider capabilities, not integrated product capabilities.
+- The final verification report lists only four narrow limitations and links to a longer file; neither report discloses that the main Web bypasses the Agent, that the Agent is mostly a skeleton, that weather/flights/preferences are not product-wired, or that Route B lacks its required map. The previous “all six phases complete” handoff was therefore materially overbroad.
+- `ManualIntercityProvider` has no explicit timeout, retry, normalized error, provenance generation, or cache boundary of its own; it filters caller-supplied options. This is acceptable as a manual input adapter only if reported as such, not as a fully realized external “real provider.”
+- The Web parses only a title-like substring from the natural-language request. Origin, destination, dates, budget, walking preference, must/exclude points, and ambiguity are not extracted into editable constraint cards or confirmed. After title confirmation it fetches globally fixed planning options and a demo route.
+- The user-facing Route B endpoint explicitly calls `fixture_route_a()` and `plan_demo_route_b()`; Route A forces `provider="fixture"` even when the service composition is live. Weather and SearchAPI are not used by the Web planning flow. The Web's evidence query is also hard-coded to one Shimokitazawa/Bocchi scenario and uses a fixed `demo-user` namespace.
+- The apparent natural-language revision is a string containment check for “少走路” and always replans Day 2 at 3 km, then splices only Day 2 into the old plan. It is correctly disclosed in known limitations as a demo, but it does not satisfy the requested general natural-language local-change behavior.
+- `RouteBPlan.omitted_reasons` exists in the API type but is never rendered in the Web. The Web renders only a Route A map; Route B has timeline cards and external Google Maps links, with no Route A/B map switch or source legend. Reviewer warnings/results are likewise not wired into this user path.
+- The compiled LangGraph has the requested node names and bounded reviewer loop, but most nodes are placeholders: subject resolution is a constant, points are four fabricated IDs (not Provider output), access is a fixed sentence, knowledge retrieval does nothing, planning produces only hashes, and the default reviewer is a fixture. The dependency manifest also lacks `langchain-mcp-adapters`. Thus the graph is a tested workflow skeleton, not the integrated runtime Agent required by the handoff.
+- The provider composition root confirms `live` means only Bangumi/ORS/Open-Meteo/SearchAPI are live; pilgrimage points remain the repository's three-record import. This is an authorized source fallback but the setting name and UI do not disclose the mixed live/imported composition clearly enough.
+- Initial implementation inventory confirms several audit-critical shortcuts: `ProviderServices` uses `fixtures/providers/points.geojson` for pilgrimage points in both `fixture` and `live` modes; the user-facing API imports `fixture_route_a`/`plan_demo_route_b`; the workflow defaults to `FixtureReviewer` and hard-codes a fixture subject; no `langchain-mcp-adapters` reference appeared in source or dependency manifests. These are evidence of product-path incompleteness even where isolated provider and graph contract tests pass.
+- Superseded audit finding: an initial broad search failed to surface Anitabi documentation, but a targeted search found the official Open API docs. The absence claim was wrong; Anitabi must be implemented through the documented API host, and the three-record import remains a fallback only.
+- The remaining RAG requirements add independently auditable obligations beyond retrieval scores: five document CRUD/search endpoints, explicit degraded states (`needs_ocr`, `insufficient_evidence`, failed pgvector health rather than a fake fallback), conflict display instead of silent LLM resolution, and zero tool/secret leakage for malicious documents. These must be checked separately from the already-passing 24-query metrics.
 - User screenshot review found that Route A rendered only a pale rectangle with three dots. The code confirmed this is a real specification regression: `RouteMap` configured a background-only MapLibre style with no OpenStreetMap/OpenFreeMap source and set `interactive: false`, even though `START_HERE.md` explicitly requires MapLibre plus OpenStreetMap/OpenFreeMap.
 - The visible count of three is data-bound, not a rendering cap. Both fixture and live provider composition currently read the same legal imported file, `fixtures/providers/points.geojson`, which contains exactly three sourced records for subject `328609`. This is a bounded demonstration corpus and must not be described as the complete real-world set for the work.
 - The safe point expansion path remains a user/project-owned legal JSON/GeoJSON import. No Anitabi scraping or invented coordinates will be added without a clearly permitted source.
@@ -112,3 +196,269 @@
 - Final Phase 1 desktop screenshot fits the complete experience in one 1440×900 frame; final mobile screenshot remains readable at the Pixel 7 CSS viewport with full-width primary action, 44px+ targets, clear card stacking, and no unintended horizontal page scroll.
 - Phase 1 gate passed all 16 checks. The report separates fixture/unit, browser E2E, and live external API evidence and explicitly records that Phase 1 made no live external calls.
 - The focused Phase 1 Git scope contains only repository handoffs, implementation, locks, human-readable report, and the two final screenshots; `.env` is confirmed ignored.
+- The Phase 9 integrated Agent test suite passes 11/11 focused tests. The Web application lives under `apps/web/`, so remediation discovery and edits must target that path.
+- Compose already injects the internal MCP URL into the API but did not wait for MCP health; API now depends on the healthy `mcp-tools` service. The current Web still calls legacy subject/Route-A/demo-Route-B endpoints, so it must be migrated to `/api/workflows` start/resume responses.
+- The runtime graph now performs subject, Anitabi, geocode, matrix, weather, validation and confirmation work, but its requirement node only validates caller-supplied fields, retrieval is still a no-op, access options are manual-only, the Reviewer defaults to a fixture, and replan changes only a hash. These are the next backend integration targets.
+- Phase 9 now replaces those requirement/retrieval/transport/reviewer shortcuts: natural-language extraction returns editable typed fields plus disclosed assumptions, project RAG evidence/conflicts enters the Agent context, flight snapshots coexist with manual choices, configured LLMs review strict JSON, rain deterministically reduces the walking cap, and ORS failures visibly become Haversine estimates. Local replanning and Web migration remain open.
+- The legacy `App.tsx` state machine is tightly coupled to four demo endpoints and locally splices a second-day response. The least risky Web migration is to preserve the established visual sections while replacing their data source with `WorkflowResponse`, adding the requirements confirmation card before subjects, and routing subject/access/modification actions through workflow resume/modify endpoints.
+
+## Phase 13 — Continuous conversational Agent
+
+- The repository already has owner/thread-scoped `trip_events` persistence plus `ProjectStore.append_event` and `list_events`. Durable conversation can be layered over that store with strict event payloads and no transcript-specific database migration.
+- The current API persists only `workflow_transition` events. It has no first-class user/assistant transcript, message endpoint, bounded conversational context, or Web rehydration path, which is why the Agent behaves like a one-shot wizard.
+- `ContextSnapshot` deliberately excludes `raw_chat_history`. Preserve that invariant: construct a separate bounded, normalized conversation view instead of injecting an unbounded transcript into graph node state.
+- Persist only normalized user/assistant messages and typed intent/action metadata. Do not persist raw provider/tool payloads, hidden reasoning, model prompts, credentials, headers, or cookies.
+- Conversational mutations must route through typed intent detection and existing deterministic workflow/modification functions. The LLM may explain or propose, but cannot directly mutate itinerary state.
+- `StoredEvent` currently omits the database event timestamp even though `TripEventRecord.created_at` already exists. Add it to the strict memory schema so the API can expose a stable ordered transcript without inventing client timestamps.
+- The existing `parse_local_modification` and `replan_local_walking` path is an appropriate mutation executor for conversational itinerary changes: it requires a target day, bounds the percentage and revision count, changes only one day, and labels Haversine degradation.
+- The Web keeps `workflow` only in component state today, so a browser reload loses the current trip even though PostgreSQL retains it. Continuous conversation therefore also requires storing only the opaque trip ID in session storage and rehydrating both workflow and messages through namespace-checked APIs.
+- The first focused static pass found only presentation lint (intentional Chinese punctuation and two long strings) plus two `Literal[str]` values incorrectly treated as enums. No architectural type error was exposed; fix these narrowly and keep Chinese output intact.
+- After API integration, mypy passed the conversation/runtime/store scope. Ruff found only import ordering and user-facing punctuation/line wrapping in `api/main.py`; no boundary or persistence type errors remain at this checkpoint.
+- Focused behavior tests pass for typed conversational modification, explicit-confirmation help, durable message recovery with timestamps, and wrong-thread isolation. Running mypy against the single test path misclassified the editable package as untyped; source-scoped mypy passes, so rely on the repository's configured full mypy invocation for the gate.
+- The Web chat is now available for every created/recovered workflow, not only completed plans. It provides grounded prompt affordances, a live transcript, typed action badges, and a combined question/change input while leaving the explicit confirmation cards authoritative.
+- The first Web lint and Vitest pass remained green (4/4) after the integration. A CSS review found one newly referenced undefined color token; replace it with a derived `color-mix` rather than expanding the global design token surface.
+- The new reload test reached the restored transcript correctly; its only failure was an ambiguous text query because the same recommended prompt and recovered user message are intentionally both visible. Assert both elements rather than treating the duplicated accessible text as a product defect.
+- Full local gates now pass after the conversation integration: Ruff/ESLint, Python/TypeScript typechecks, 78 Python tests at 80.13% coverage, 5 Web tests, and the production Web build. The only build note is the pre-existing large Vite chunk warning.
+- The running Compose stack is healthy but predates the new code, so it cannot be used as Phase 13 evidence until the API/Web images are rebuilt. Add a browser acceptance that performs a conversational replan and reload before rebuilding.
+- Rebuilt the full Compose stack successfully with preserved project data and healthy PostgreSQL, MCP, API, and Web services.
+- The first real browser conversation request returned HTTP 200, but only after the assertion timeout because a configured LLM was consulted even for an obvious deterministic “Day 2 walking reduction” command. Safety-sensitive and recognized intents should take the deterministic fast path; reserve LLM synthesis for otherwise-general questions.
+- After the fast-path correction and API rebuild, Compose health, focused Python/Web static checks, 2 conversation tests, and the real desktop conversational replan/reload E2E all pass; the end-to-end interaction completes in about five seconds.
+- A diagnostic command mistakenly passed a TypeScript E2E file to Python Ruff, producing irrelevant parser errors while the subsequent scoped build still succeeded. Use ESLint for TypeScript and do not treat that output as a code failure.
+- Final `make verify-all` passed in 554.9 seconds. It rebuilt from empty project volumes, migrated PostgreSQL, preserved namespace recovery across restart, passed all six phase gates, ran 79 Python tests at 80.17% coverage, and passed the 10-case serialized desktop/mobile browser suite including conversational replan and reload recovery.
+- Post-report documentation, lint, typecheck, and secret-scan checks also pass; the final secret scan covered 1,292 text files without printing values.
+- The optional in-app Browser runtime still fails during bootstrap with `Cannot redefine property: process`, and the troubleshooting documentation interface is unavailable because setup never creates `agent`. Do not retry or switch into the user's Chrome; rely on the already-passing repository Playwright desktop/mobile evidence for local visual acceptance.
+
+## Phase 14 — Remediation handoff
+
+- The supplied archive contains the five explicitly required remediation documents plus alternate `AGENTS.md`, `START_HERE.md`, acceptance, decisions, README, and kickoff files. Extract it into an isolated directory first so the current repository instructions are not silently overwritten before their differences are audited.
+- The repository is clean on `codex/publish-current-project` at remediation start. Legacy `make verify-all` remains useful as a regression suite only, not as the completion condition for this round.
+- The archive was safely extracted under `.remediation-handoff/`; no repository files were overwritten.
+- `REMEDIATION_START_HERE.md` identifies commit `a7350f4e92c98f403e9df9814b2d3e9cb4a5249b` as the audited implementation, matching the current published baseline.
+- Remediation completion is governed by `docs/13_REMEDIATION_ACCEPTANCE.md`. Capability evidence must report `PASS`, `PARTIAL`, `SKIP`, or `UNVERIFIED` and label data as `live`, `fixture`, `fallback`, or `imported`.
+- The required target supports 1–3 subjects, separates scene evidence/place/area, plans Access/Base/day layers, uses typed Agent handoffs and general `PlanPatch`, revalidates deterministically after patches, and exposes one mixed-initiative workspace.
+- The remediation `AGENTS.md` is compatible with the repository rules and adds a vertical-capability evidence requirement across the real Web→API→Agent→Provider path; old phase gates must remain as regressions.
+- Audit P0 finds a concrete configuration defect: uppercase Compose `PROVIDER_MODE` is ignored because `Settings` is case-sensitive and the field has no alias. Live geocode/weather/matrix errors also bypass documented degradation in the production graph.
+- Audit P1 confirms the domain migration cannot be an array-only edit: subject, evidence, place, shared-place coverage, area, candidate graph, plan version, handoff, and general patch concepts are missing or single-subject throughout the stack.
+- Audit P2 identifies three distinct algorithms that must not be conflated: evidence→canonical place resolution, place→geographic/travel-time area clustering, and area→constrained day assignment.
+- Current conversation changes bypass graph checkpoints and Validator/Reviewer, ContextBuilder is Reviewer-only, provider caches are process-local despite SQL cache support, and RAG evidence is not converted to deterministic constraints.
+- The current Web is a polished fixed wizard whose map is read-only and renders raw points; the target needs progressive area/place/evidence disclosure, plan versions/branches, editable map/plan actions, and persistent conversation/constraints/sources/activity views.
+- Additional audited defects to verify in source: duplicate subject fetch, duplicate validator parsing, per-operation resource recreation, fixture endpoints alongside Agent paths, namespace-insensitive document IDs, missing SQL conflict detection, and client-assembled exports.
+- The specification defines compatibility as adapters only: `TripRequest.subject_intents` and `ItineraryVersion` become sources of truth; legacy `anime_query`, Route A and Route B remain migration views.
+- Required invariants include no silent evidence loss, no duplicated shared-place visits, structured omission reasons, versioned/idempotent patches, deterministic impact analysis/revalidation, and visible provider/evidence mode at every boundary.
+- `PlanPatch` must cover requirement/date/budget/walking, subject intent/confirmation, place include/exclude/move/reorder, access/base, strategy, branch, knowledge, and merge decisions with expected base version and idempotency key.
+- Recommended first algorithms: spatial blocking plus deterministic pair policy and guarded union-find/cluster consistency for place resolution; Haversine DBSCAN plus travel-time correction for areas; explainable area selection/day assignment/place selection/bounded matrix/nearest-neighbor+2-opt for itineraries.
+- Runtime resources should move to lifespan management; graph provider calls should use one typed `ToolOutcome` wrapper with explicit degradation rather than inconsistent broad exceptions.
+- RAG needs a strict `RetrievedEvidence → ProposedKnowledgeRule → authority/conflict validation → advisory/constraint` boundary; uploads/deletions trigger impact analysis and revalidation.
+- The new Web architecture should use server-owned versions and unified patch preview/apply APIs for both chat and direct manipulation, with at least two comparable strategies and progressive raw-evidence disclosure.
+- Remediation acceptance defines ten mandatory product-path scenarios (A–J): truthful runtime, multi-subject evidence, place resolution, area clustering, hierarchical alternatives, general patch/impact, violation-specific replanning, production RAG loop, mixed-initiative workspace, and legacy migration.
+- Scenario evidence must separate fixture/integration/browser/live results. SearchAPI exhausted budget is explicitly `UNVERIFIED`, never PASS; optional external unavailability cannot be relabelled as successful behavior.
+- Browser acceptance requires direct include/exclude/move/reorder patch previews, upstream edits without restart, version comparison, raw-count disclosure/drill-down, and real desktop/mobile application evidence.
+- Completion also requires empty and existing database Alembic migration, legacy request/Route adapters with a documented removal condition, security scans, provider-mode matrix, and no claims broader than executed evidence.
+- Historical docs 01–04 preserve the three-layer Access/Base/Pilgrimage model, explicit confirmation policy, read-only MCP allowlist, Route membership/omission invariants, and five project-owned storage categories; remediation extends rather than discards these foundations.
+- The older architecture already required graph state to carry IDs/summaries instead of large objects and each node to receive minimum versioned context. The audit confirms the implementation currently violates this, so remediation is restoring an existing contract as well as adding new role projections.
+- Existing provider rules require normalized error categories, TTL/cache provenance, explicit Haversine degradation, no invented forecasts/prices, and bounded SearchAPI use. These constraints remain compatible with the new `ToolOutcome` boundary.
+- Historical docs 05–08 keep the six old gates and fixture/live separation strictly as regression evidence; they also preserve source priority, prompt-injection isolation, relative-date tests, provider degradation, and no-booking/security rules.
+- The RAG spec fixes the production design: E5 384-d exact pgvector + persistent bm25s + RRF, server-derived namespaces, authority/freshness/conflict handling, derived citations, deletion consistency, and a 24-query golden set. The remediation must extend this with typed rule derivation, not replace structured providers with RAG.
+- ADRs explicitly call for normalized tool cache and minimal state/context. Provider cache integration and role-specific projections should therefore be implemented as conformance fixes, not optional architecture changes.
+- The current source is compact rather than package-split: persistence is `src/pilgrimage_agent/persistence.py`, memory/RAG have their own packages, and the Web remains one `App.tsx`. New architecture should avoid inventing paths from the historical recommended tree.
+- Only three Alembic revisions exist (`foundation`, `project_memory`, `rag`); all new domain, handoff, patch, rule, graph, and itinerary persistence needs additive migrations.
+- Source verification confirms the P0 alias defect exactly: `provider_mode` is the only relevant setting without `Field(alias="PROVIDER_MODE")` while configuration is case-sensitive.
+- `TripRequest`, `WorkflowResponse`, graph state and confirmation schemas are singular (`anime_query`, one candidate set, one confirmed subject, one Route A). `PlanModification` and `ReplanPatch` only model day walking reduction.
+- Persistence currently stores full workflow response JSON in `trips.state`, generic trip events, preferences, RAG, and tool cache; it has no normalized subject/evidence/place/area/itinerary/patch/handoff/rule records.
+- `db.session_scope()` creates and disposes an engine per use, confirming the runtime-resource audit. The API should own one engine/session factory/checkpointer/tool client through lifespan.
+- The existing strict Pydantic base is frozen/extra-forbid and is a strong foundation for new immutable domain and boundary schemas; migration adapters can preserve old payloads without weakening validation.
+- Full graph tracing confirms inconsistent degradation: points/flights catch broadly, geocoding catches only `NotImplementedError`/`ValueError`, weather/matrix catch a different set, and normalized `ProviderError` can crash several live nodes.
+- The Reviewer receives only snapshot ID, violation codes and revision count. The snapshot facts are just counts, while the full Route A IDs are passed; Replanner always applies a 30% walking reduction to a target day regardless of violation semantics.
+- API tracing confirms each workflow, store, knowledge and conversation request creates/disposes its own engine and often a new LLM client/MCP discovery/checkpointer; `checkpointer.setup()` runs on ordinary workflow operations.
+- Direct `/modify` and conversation mutation call `_modified_workflow`, overwrite the JSON response, and never re-enter LangGraph, update checkpoint state, run impact analysis, validate, review, or persist a patch/version.
+- Knowledge create/delete endpoints do not connect to a trip workflow, retrieval refresh, rule extraction, impact analysis or revalidation. Legacy fixture Route A/B endpoints remain first-class alongside the Agent path.
+- Existing API lifespan is not configured despite having several local async context managers; the safe migration is to add application lifespan resources with test-overridable dependencies, then reuse them in all endpoints.
+- Provider composition is globally cached but has no safe mode diagnostics beyond boolean credential presence. In live mode implementations can be instantiated without credentials and fail later; diagnostics must distinguish `live`, `fixture`, `fallback`, `unavailable`, and `unverified` without values.
+- `cluster_points()` is confirmed to be longitude/latitude sorting split evenly by day. Planner uses those buckets directly, not canonical places or versioned areas; all selected raw records enter one bounded matrix after distance ranking.
+- Base/access planning is universally `Asia/Tokyo`, manual options use fixed 07:00/09:30 and 18:00/20:30 times, and base candidates are centroid/destination geocode estimates only. These must be disclosed and separated from confirmed inputs in the new model.
+- SQL RAG path filters every dense and BM25 result by at least two lexical overlaps and omits `detect_conflicts()`, exactly matching the audit. Shared conflict detection and calibrated dense thresholds are required.
+- `ingest_document()` constructs the default document UUID from the optional function argument `namespace` before deriving the authorized namespace, so ordinary uploads hash `None:<content>` and can collide across users/trips.
+- ContextBuilder has one generic v1 projection and only the Reviewer uses it; it contains raw owner/thread IDs among `state_ids` and lacks user priorities, itinerary summary, coverage, omissions, evidence quality, patch boundaries, and explicit byte/token budget metadata required by role.
+- Runtime-truthfulness remediation now fixes uppercase selection, exposes safe mode/configuration/status diagnostics, and routes every graph MCP provider call through one typed outcome policy. Injected geocode/weather/matrix rate limits complete with visible warnings and Haversine fallback instead of crashing.
+- Application resources are now created once per server lifespan; checkpoint connection/setup is lazy and reused after the first workflow operation, while direct unit calls retain a bounded compatibility context.
+- Rebuilt Compose truthfully reports four healthy services, database `ok`, fixture Bangumi/ORS/Open-Meteo/SearchAPI and live Anitabi. No SearchAPI live request was made; its external proof remains `UNVERIFIED`.
+- The new immutable domain foundation enforces 1–3 subject intents with one primary, evidence/place separation and total evidence accounting, shared-place appearance coverage without duplicate visits, versioned candidate/itinerary objects, discriminated patches, typed handoffs/contexts, and authority-gated knowledge rules.
+- Alembic `0004` adds all remediation persistence tables without modifying old migration history or `trips.state`. Both an existing database upgrade and a clean `0001→0004` upgrade passed; compatibility data remains readable.
+- The new Workspace Agent independently resolves up to three subject intents, requires per-intent catalog confirmation, isolates Provider failures, normalizes Anitabi points into scene evidence, and derives canonical places/areas before planning. Its default API projection exposes progressive counts while raw evidence requires the explicit evidence endpoint.
+- `/api/workspaces` is namespace-safe and state-versioned in the project trip store. It creates two independent hierarchical strategy versions and persists typed transition events; `/api/workflows` remains available but schema-v2 state is never silently parsed as a legacy workflow.
+
+### 2026-07-14 - Remediation implementation and acceptance are complete
+
+- The product path now supports one to three independent works, scene-evidence-to-place consolidation, shared-place appearances, stable Haversine DBSCAN areas, hierarchical area/day/place planning, typed Agent handoffs and bounded role contexts.
+- PlanPatch is the common preview/confirm/apply mutation boundary, with optimistic version checks, idempotency, persisted pending previews, structured diffs, and violation-specific bounded replanning.
+- Retrieved documents cannot directly mutate trip constraints. They can only create typed proposals; accepted, non-conflicting rules become deterministic planning inputs.
+- The primary Web experience is a responsive mixed-initiative workspace with persistent conversation, canonical-place map filters, itinerary versions, omissions, evidence counts, and a separately labelled legacy compatibility flow.
+- Real read-only Anitabi acceptance returned 119 scene records, resolved them to 96 canonical places and 28 areas, and scheduled 36 places over three days in the browser scenario.
+- The legacy Route B compatibility endpoint must use the same configured point Provider as Route A. Its matrix is deterministically bounded to 49 points and all remaining Route A points receive explicit omission reasons.
+- Final `make verify-all` passed in 652.4 seconds: 131 Python tests (80.41% coverage), 8 Web unit tests, all six historical phase gates, the clean four-service Compose stack, SQL/real-E5 RAG checks, desktop/mobile E2E, and remediation scenarios A-J.
+- Honest remaining limits: SearchAPI live quota is UNVERIFIED, area road-time correction falls back to labelled Haversine estimation without ORS, and local owner identity is not production authentication.
+
+### 2026-07-15 - User-facing workflow must be singular and conversational
+
+- The initial workspace prompt leaks internal concepts such as catalog identity and a named evidence provider. These are implementation details and must not appear in ordinary conversation.
+- Splitting input only on punctuation/newlines makes an unbracketed natural sentence one invalid title query. Intake needs deterministic extraction of bracketed titles and common Chinese conjunction forms, while preserving the original request as conversation context.
+- Rendering the remediated workspace and the legacy Route A/Route B interface together creates two competing workflows. The Web product must expose only the workspace; old API endpoints may remain invisible for compatibility and contract tests.
+- The current map is 420 px tall on desktop and 350 px on mobile. More importantly, its initial `all` filter fits bounds around every candidate, so a distant omitted point can force a world-scale view. The planned state should default to scheduled places and expose all candidates only when requested.
+- A selected map marker currently shows only the canonical name and PlanPatch action buttons. The expected consumer interaction is a scene-rich place detail: work title, episode/timestamp, scene image when available, place/source context, and then secondary itinerary actions. Raw evidence should be fetched progressively only after selection and translated into user language.
+- The conversation pane exposes a workspace UUID prefix and a raw state enum; the context pane exposes internal Agent role names and task identifiers. These are operational diagnostics, not user decisions. Remove them from the consumer UI and retain diagnostics only in backend state/reports.
+- Official Anitabi API documentation confirms detail records include `image`, `ep`, `s`, `origin`, and `originURL`; mobile displays should replace `plan=h160` with `plan=h360`, avoid full-size images, and show origin attribution/linking beside screenshot data. The current provider schema discards `image`, so scene detail requires carrying a validated image URL through PilgrimagePoint and SceneEvidence before progressive UI loading.
+- Map actions are currently single-place only. The existing direct PlanPatch API already accepts an operations array, so the UI can support marker multi-selection and submit one preview containing multiple include/exclude/move operations without adding a second mutation path.
+- Workspace creation currently persists no opening conversation messages, so the user's natural request disappears immediately after submission and reload restores an empty transcript. Persist the opening user request and a concise confirmation prompt as normal conversation events.
+- Historical Web/E2E tests are coupled to the removed legacy UI, including exports and Route A/B labels. Their backend contract coverage remains valid, but browser acceptance must be rewritten around the single workspace flow, scene details, batch selection, patch preview, and reload persistence.
+- Persisting the opening exchange adds two conversation events immediately after `workspace_started`; namespace and event-order tests must expect that pair before subsequent confirmation/planning events.
+## 2026-07-15 Phase 15 final inspection
+
+- The single workspace now exposes multi-select as an explicit map mode and builds one place-operation per selected point inside a single preview request.
+- The latest copy patch is present: the visible map label, product name, and confidence options use user-facing pilgrimage language; provider and orchestration names remain internal types only.
+- Remaining work is verification: repair any browser-spec locator drift, rebuild the Compose stack, exercise multi-point submission end to end, and run the aggregate gate.
+- Dense map markers can overlap on mobile even when they are individually present in the DOM. A batch workflow therefore needs a non-map selection surface; the implemented checkbox list makes multi-point selection deterministic and keyboard accessible.
+- Persisted assistant copy is part of the visible UI boundary. Hiding a diagnostics panel was insufficient because the message endpoint still named internal patch and planner nodes; the endpoint now emits only user-facing change guidance.
+- A compact map can remain useful without being the sole navigation surface. The final design keeps marker interaction, adds a collapsed point browser for deterministic detail access, and exposes checkboxes only in batch mode, avoiding a permanently oversized list.
+
+## 2026-07-15 Phase 18 editable work collection diagnosis
+
+- The checked-in Phase 17 source already renders candidate entries as checkboxes and includes “选择全部季度与版本”, but the JavaScript bundle currently served on port 4173 does not contain that label. The running Web container is stale, which explains the radio controls in the user screenshot.
+- This is not only a stale-build issue. The product model currently bounds a workspace to 1–3 initial subject intents and provides no consumer-facing add/remove endpoints after creation or planning.
+- `SubjectIntentOperation` exists in the generic PlanPatch schema, but the workspace apply path does not yet rebuild catalog groups, evidence, canonical places, areas, candidate graph, or itineraries for collection edits. Exposing it directly would therefore be misleading.
+- The correction must treat works as a persistently editable collection: add by natural title search, confirm one or more matching seasons/films, remove explicitly, preserve unaffected confirmed subjects, rebuild derived geography, and invalidate/regenerate itinerary versions honestly.
+- UI acceptance follows the existing design system: native checkboxes, visible selected counts, 44px actions, explicit destructive wording, keyboard operation, and equivalent desktop/mobile controls.
+- Live product verification confirmed three K-On entries can remain selected while adding one Bocchi entry. The combined workspace changed from 178 scene records / 138 places / 30 areas to 252 records / 195 places / 43 areas, then editing out the K-On film preserved Bocchi and produced 201 records / 152 places / 32 areas.
+- A live browser pass exposed and fixed old nested candidate-group intent snapshots. Compatibility projection now derives each group intent from the authoritative requirements collection, so persisted workspaces also recover every selected season after reload.
+- The dedicated Phase 18 browser gate passes on desktop and mobile and covers add, confirm, edit selected versions, and remove without restarting.
+
+## 2026-07-15 Phase 19 authoritative remediation intake
+
+- `CODEX_REMEDIATION_HANDOFF.md` is an untracked user-supplied authority file and must be preserved.
+- The checked-out branch is `codex/publish-current-project`, tracking the matching origin branch; there are no tracked working-tree or index changes at intake.
+- Existing planning records report Phase 1–18 complete, so the new audit must prove current gaps against code and tests instead of reimplementing historical items.
+- The handoff's first 220 lines establish the primary defect: the multi-workspace product path bypasses the old LangGraph runtime, while Reviewer/Replanner/handoffs and travel tools are not genuinely executed on that path.
+- The handoff explicitly distinguishes exclusion, clearing the scheduled itinerary, deleting an itinerary version, and deleting a workspace; candidate exclusion must not silently refill a cleared itinerary.
+- Complete Anitabi ingestion must use the handoff-specified MiriaGo static-data approach and report completeness/source/version honestly.
+- Role contexts must be minimal and role-specific; the graph state stores stable structured state/references, while conversation events, preferences, TTL-bound provider facts, RAG knowledge, and execution audit remain separate layers.
+- Handoffs require a real pending → running → completed/partial/failed/cancelled lifecycle with run IDs, input/output references, timestamps, retries, and correlations; only validated receiver output can complete them.
+- The static Anitabi adapter must merge `g.json` coordinates with versioned `gN.json` details, search alternate pages on index/page skew, enforce allowlisted filenames/domains/body limits/timeouts/retries, and mark detail-endpoint fallback incomplete.
+- Map marker clustering, canonical-place identity resolution, and travel-area clustering are distinct algorithms. Canonical identity cannot use source/origin labels as place identity, and DBSCAN border assignment must be order-independent.
+- SearchAPI must normalize flights, transit, and place facts into TTL-bound outcomes; ORS supplies geocoding/walking/directions/matrices but not transit schedules; Open-Meteo long-range results remain unknown pending refresh.
+- The planner must use a time-dependent access/inter-area/intra-area/visit/base graph, may combine multiple reachable areas per day, generate materially distinct strategies, and keep all arithmetic/feasibility checks deterministic.
+- Plan operations must distinguish clear schedule/day, exclude/include candidate, remove visit, delete/restore itinerary version, archive, and permanent workspace deletion. Clearing a schedule must stop in `ready_to_plan` without refill.
+- RAG is limited to stable guidance/documents and proposed rules with evidence/acceptance; IDs, coordinates, real-time travel/weather/place facts, and arithmetic stay in structured provider snapshots.
+- The remainder of the handoff requires a mixed-initiative workspace without hard-coded origin/destination/walking defaults, natural-language impact previews, injected development identity, thin compatibility APIs, and visible source/update/warning state on desktop and mobile.
+- Acceptance must prove the new workspace actually enters LangGraph, Reviewer is called, Replanner limits impact, handoff timestamps/statuses reflect execution, interrupts survive reload, and LLM failure degrades honestly.
+- The definition of done also requires transactional workspace deletion (without deleting user-global knowledge), undo/restore as new audited versions, travel providers entering planning/validation, and honest PASS/FAIL/UNVERIFIED reporting.
+- After fetching the authoritative remote branch, local HEAD and `origin/codex/publish-current-project` both resolve exactly to review baseline `c544c3b9c1010d17e3a117c73ae273c489c0af56`; there are zero commits after the baseline.
+- At intake there were no tracked/staged user code changes after the baseline. The only pre-existing worktree item was the untracked authority handoff; current planning-file modifications are this session's bookkeeping.
+- Baseline `make verify-all` passed at exact baseline commit in 579.7 seconds: Python lint/typecheck, 136 tests at 81.17% coverage, 9 Web unit tests, 14 desktop/mobile E2E tests, six historical phase gates, clean Compose rebuild/recovery, and remediation A–J.
+- The passing baseline still reports only 74 sourced Anitabi points in the Compose demo. This is direct evidence that historical acceptance does not satisfy the new static-data completeness requirement.
+- Baseline live boundaries remain mixed: SQL/real-E5 and Compose infrastructure were exercised, while provider contract tests use fixtures and the output does not prove live SearchAPI transit/place/flight quotas or a real Workspace Reviewer call.
+- README currently claims `API → LangGraph workflow`, a durable LangGraph workflow, structured review, and current-user deletion, but its Known Limitations simultaneously documents detail-endpoint incompleteness and a latest-50-message strategy. These claims must be reconciled with the actual workspace path.
+- Source tracing shows `/api/workspaces` constructs and calls `WorkspaceAgent` directly. `ApplicationResources` separately builds the legacy `build_workflow(... reviewer=self.reviewer)`, while `WorkspaceAgent` is constructed without a reviewer boundary.
+- The only `StateGraph` implementation is `agent/graph.py`, and its Reviewer/Replanner coverage is exercised by legacy Phase 4 tests. Current workspace tests instantiate `WorkspaceAgent` directly, matching the handoff's core audit finding.
+- `workspace.py` has its own `_handoff()` helper and creates Reviewer/Replanner contexts, so the next audit must distinguish records/context preparation from actual receiver execution.
+- `ApplicationResources.workspace_agent` receives only the MCP tool client and optional requirement extractor. The configured `ResilientReviewer` is passed exclusively to the legacy `workflow_graph()`.
+- Every current workspace API operation (`start`, subject confirmation, plan, patch preview/apply, and messages) loads state and invokes `WorkspaceAgent` directly; there is no graph invoke/resume/checkpoint path for `/api/workspaces`.
+- `WorkspaceAgent._handoff()` writes `completed` immediately (or `partial` when a warning exists) with identical created/completed timestamps. It has no pending/running state, receiver execution, retry, result validation, started timestamp, or failure state.
+- `_execute_plan()` creates Reviewer contexts and a Validator→Reviewer handoff but never calls a Reviewer. Its workspace status depends only on deterministic itinerary validation issues.
+- Patch application creates a Replanner context after deterministic recomputation and then writes a Replanner→Validator handoff as already completed/partial. No bounded Replanner agent executes, and impact-directed graph routing is absent.
+- Current patch logic replans whenever itineraries/candidates/base/dates remain available. This explains why excluding every scheduled visit refills from the remaining candidate pool; explicit clear/remove/version/workspace operations are missing from this path.
+- `AgentHandoff` already models pending/running/terminal states, retry count, refs, warning/error, and completion time, but lacks `started_at`, `cancelled`, parent/correlation IDs, and an explicit result payload reference. The runtime bypasses even its existing lifecycle capacity.
+- `WorkspaceState` is a monolithic persisted state containing domain facts plus handoffs, contexts, patches, impacts, and warnings. There is no pending graph confirmation/checkpoint reference, validation report collection, reviewer assessment collection, provider snapshot refs, or AgentRun/ToolCall audit model.
+- RoleContextBuilder provides useful bounded, secret-free Reviewer/Replanner projections and should be reused in the graph rather than replaced. Its current builders contain sufficient starting facts/refs but are not connected to actual role execution.
+- Normalized itinerary/patch/handoff projection tables use trip-level `ON DELETE CASCADE`, but the repository/API currently expose no transactional workspace deletion path and handoff rows persist only created/completed timestamps.
+- Current `AnitabiProvider` calls only `api.anitabi.cn/bangumi/{id}/lite` plus `/points/detail`; there is no `g.json` index, `gN.json` page merge, version cache, alternate-page scan, refresh/clear, static host allowlist, or MiriaGo parser.
+- `PilgrimagePointResult` exposes only points/is_complete/warnings/provenance. It lacks `expected_count`, `loaded_count`, `data_version`, and an explicit static-vs-detail source field required by the handoff and UI.
+- Provider composition selects the detail API for `PILGRIMAGE_POINT_MODE=anitabi` and wraps it with legal-import fallback. The fallback mechanism and generic SafeHttpClient/cache/ToolOutcome boundaries are reusable, but detail fallback must remain `is_complete=false` after static failure.
+- The MCP allowlist/tool still uses `fetch_pilgrimage_points`; no `fetch_anitabi_static_points` exists. Existing acceptance asserts exactly nine tools, so adding transit/place/static boundaries will require intentional contract migration rather than hidden extra tools.
+- Existing Anitabi tests prove detail normalization, mismatch disclosure, and cache reuse only. They do not cover the six new static-data scenarios. Current remediation acceptance labels diagnostics/live browser evidence as sufficient despite the Compose smoke loading 74/414.
+- PlanPatch currently supports requirement, subject-intent, place include/exclude/move/reorder, selection, knowledge, and merge-decision operations only. There are no clear-schedule/day, remove-visit, itinerary delete/restore, archive, delete-workspace, or undo operations.
+- `confirmation_required()` does not treat place exclusion as material, and natural-language parsing is UUID-oriented and lacks the handoff's clear/undo/restore/delete intents.
+- Impact analysis names invalidated nodes but no graph consumes those names; workspace application still recomputes directly. The useful stable/invalidated reference policy can become routing input for the new graph.
+- `ProjectStore` supports trips/events/preferences but no trip deletion; `WorkspaceRepository` only saves normalized projections. No workspace DELETE, clear, itinerary restore/delete, archive, or checkpoint cleanup API exists in backend or Web.
+- Existing collection-removal tests intentionally assert itineraries are regenerated/preserved; there is no regression for clearing all scheduled visits without refill, single-day stability, version restore, transactional deletion, or global-knowledge preservation.
+- SearchAPI implements only Google Flights and flight calendar. There are no transit-directions or Google Maps/place-facts schemas/providers/fixtures/tools, and the MCP server exposes only the original nine tools.
+- Current workspace confirmation runs `resolve_places()` and `cluster_places()` synchronously with no ORS matrix, transit connectivity, place facts, weather, access search, or user access/base confirmation. Planning receives only a caller-supplied optional `AccessSelection`.
+- Hierarchical planning hard-codes `selected_areas = reachable_areas[:len(windows)]` and assigns exactly one selected area per day. Inter-area transfer is a Haversine-derived scalar, not a sourced time-dependent transit edge.
+- The planner has access arrival/return buffers and closure rules, but no provider place opening windows, transit segments/transfers, weather risks, TTL validation, or cross-city reachability graph. Current strategy differences are score-weight variants over the same one-area/day heuristic.
+- Place resolution still merges any records with equal `source_label` inside 100 m, exactly the high-risk rule prohibited by the handoff, and compares every evidence pair O(n²) without a spatial candidate index.
+- Area clustering accepts optional walking durations and has stable IDs/no-loss checks, but workspace never supplies them. Its DBSCAN immediately persists noise as singleton/assigned, preventing a later core expansion from absorbing that border point; the handoff's border-order bug remains.
+- The Web still hard-codes `local-web-user`, a fixed thread, `origin="东京"`, `destination="东京"`, and `walking_preference="medium"`; this bypasses Requirement Agent extraction and violates the handoff's first frontend acceptance scenario.
+- Workspace API lacks list, resume, run, handoff, provider-snapshot, clear, restore, and delete endpoints. The only `/resume` endpoint belongs to legacy `/api/workflows`.
+- Conversation events are fully persisted, but API projection truncates to the latest 50 and LLM injection uses only the latest 8. There is no traceable summary or protected unresolved-decision/confirmation memory, matching the documented limitation.
+- Existing LLM RequirementExtractor, strict Reviewer schemas/boundaries, resilient fallbacks, conversation responder, hybrid RAG retrieval, rule proposal/acceptance, and bounded RoleContext builders are reusable components; the main gap is orchestration and workspace-state integration rather than absence of all primitives.
+- RAG rule acceptance can already create active constraints and the hierarchical planner consumes closure-date rules. However knowledge retrieval is API-driven rather than a workspace graph node, the Web lacks the required evidence/rule management surface, and real-time facts are not represented as separate provider snapshots.
+
+## MiriaGo static-format reference
+
+- The explicitly referenced MiriaGo source confirms index work records use Bangumi ID at `[0]`, preferred titles at `[1]/[3]`, city at `[4]`, center at `[9]/[10]`, zoom at `[11]`, and the compressed lite-point array at `[12]`.
+- Lite points are groups of four: point ID, latitude, longitude, and an unused fourth value. Page selection is `work_index // page_size`.
+- Page entries use Bangumi ID at `[0]` and compact detail rows at `[2]`. Detail rows use ID `[0]`, name `[1]`, Chinese name `[2]`, image `[6]`, episode `[8]`, seconds `[9]`, note `[10]`, origin `[11]`, and origin URL `[12]`; coordinates come from the index's ID map.
+- MiriaGo's reader allows only `g.json` or `g<digits>.json`, tries `www.anitabi.cn/d` before `anitabi.cn/d`, and adds an optional version query. The handoff additionally requires persisting/using index `[2]` as the data version and scanning alternate pages on index/page skew.
+
+## Final Phase 19 findings
+
+- A non-empty `checkpoint_ns` on the root compiled graph is not a harmless business namespace:
+  LangGraph treats it as a subgraph path during checkpoint inspection/update. This caused normal
+  resume calls and rebased subject-confirmation checkpoints to diverge. Versioning the hashed
+  root `thread_id` and leaving the root checkpoint namespace empty restores one authoritative
+  checkpoint lineage.
+- After that correction, a confirmed PlanPatch add preserves every previously confirmed subject,
+  confirms the new candidate set, advances the current workspace version, and remains recoverable
+  through the PostgreSQL checkpointer.
+- The final acceptance baseline is 167 Python tests at 81.50% coverage, 15 Web unit tests, and
+  14 serialized desktop/mobile E2E scenarios. `make verify-all` and remediation A-J both pass.
+- Live SearchAPI transit/place evidence is still honestly UNVERIFIED when live smoke is disabled;
+  bounded fixture/provider contracts and deterministic unknown/partial behavior are verified.
+
+## 2026-07-15 Phase 20 large-batch failure diagnosis
+
+- The user-visible validation payload proves the batch UI submitted 109 individual
+  `PlaceOperation` objects while `PlanPatch.operations` is bounded to 25 items.
+- The limit is a useful LLM/tool-boundary guard and should not simply be raised to the size of
+  the current corpus. A dedicated bounded batch-place operation can represent one user action,
+  preserve the common preview/apply/impact path, and keep patch complexity explicit.
+- The Web request helper currently throws the response body verbatim for every non-2xx response.
+  FastAPI/Pydantic validation arrays therefore leak schema paths and internal UUID payloads into
+  the consumer interface. Error normalization must never render structured validation bodies.
+- The exact product regression is the largest current K-On travel area: 109 canonical places.
+  Acceptance must cover more than 25 selected places and verify one coherent preview rather than
+  splitting the user's action into partially applied requests.
+- The corrected boundary keeps `PlanPatch.operations` at 25 while adding one `place_batch`
+  operation with 2–2000 unique canonical IDs. Include, exclude, and move-day batches expand only
+  inside deterministic application and remain one persisted/idempotent patch.
+- FastAPI request validation now returns one value-free 422 detail, and the Web maps all unknown
+  validation bodies to concise Chinese copy. Neither schema locations nor submitted UUID arrays
+  enter the visible error surface.
+- Rebuilt Compose acceptance passed the real K-On all-versions workflow on desktop and mobile:
+  the current list contained more than 25 places, the request contained exactly one batch
+  operation covering the complete selection, and the preview dialog rendered successfully.
+- Per the user's updated layered-validation policy, the subsequently started full Phase 5 gate
+  was intentionally stopped while still running. It produced no completion result and is not
+  claimed as PASS; the last unaffected Phase 5 result remains historical regression evidence.
+
+## 2026-07-15 Phase 21 planning failure and latency diagnosis
+
+- The reported planning action is not merely slow: two current Compose requests to the workspace
+  planning endpoint returned HTTP 409.
+- Place PlanPatch application advances the authoritative database `WorkspaceState`, but only
+  subject-confirmation patches currently rebase the durable LangGraph checkpoint. The next plan
+  resume therefore compares the new request version with an older checkpoint workspace and
+  permanently fails with a state-version conflict.
+- The repair must be plan-time self-healing so already affected workspaces recover without being
+  recreated. It must preserve the database workspace as authoritative and resume at the typed
+  access/base confirmation boundary.
+- The user also requested the previously observed planning latency be addressed. Profiling and
+  optimization will follow the correctness repair and must retain Reviewer, deterministic
+  validation, provenance, and bounded tool behavior.
+- The main avoidable critical path was 12 bounded place-fact checks, each performing search then
+  detail in a fully serialized loop (up to 24 consecutive tool waits). Weather and knowledge then
+  ran after that loop, and the two independent itinerary Reviewer calls were also serialized.
+- A four-request semaphore now bounds place-fact concurrency. Place facts, weather, and knowledge
+  run concurrently and merge only their disjoint typed projections; both itinerary Reviewer calls
+  also run concurrently while retaining one assessment per strategy in stable order.
+- The previously failing real workspace recovered in place: its planning request returned HTTP
+  200 in 6.47 seconds, persisted state version 8 with status `planned`, two itinerary versions, and
+  two Reviewer assessments. No fixture result was substituted for this Compose check.

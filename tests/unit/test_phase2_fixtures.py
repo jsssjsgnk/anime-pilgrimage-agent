@@ -17,14 +17,24 @@ from pilgrimage_agent.domain.models import (
     SubjectSearchQuery,
     WeatherForecastQuery,
 )
-from pilgrimage_agent.providers.bangumi import FixtureBangumiSubjectProvider
+from pilgrimage_agent.providers.anitabi import FixtureAnitabiProvider
+from pilgrimage_agent.providers.bangumi import (
+    BangumiSubjectProvider,
+    FixtureBangumiSubjectProvider,
+)
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.cache import MemoryProviderCache, request_fingerprint
-from pilgrimage_agent.providers.ors import FixtureOpenRouteServiceProvider
-from pilgrimage_agent.providers.points import FixturePilgrimagePointProvider, build_route_a
-from pilgrimage_agent.providers.searchapi import FixtureSearchApiFlightProvider
+from pilgrimage_agent.providers.ors import (
+    FixtureOpenRouteServiceProvider,
+    OpenRouteServiceProvider,
+)
+from pilgrimage_agent.providers.points import build_route_a
+from pilgrimage_agent.providers.searchapi import (
+    FixtureSearchApiFlightProvider,
+    SearchApiFlightProvider,
+)
 from pilgrimage_agent.providers.service import ProviderServices
-from pilgrimage_agent.providers.weather import FixtureOpenMeteoProvider
+from pilgrimage_agent.providers.weather import FixtureOpenMeteoProvider, OpenMeteoProvider
 
 
 async def test_bangumi_fixture_success_empty_and_not_found() -> None:
@@ -40,7 +50,7 @@ async def test_bangumi_fixture_success_empty_and_not_found() -> None:
 
 
 async def test_route_fixture_and_ors_fixture_contracts() -> None:
-    point_provider = FixturePilgrimagePointProvider(Path("unused"))
+    point_provider = FixtureAnitabiProvider(Path("unused"))
     imported = await point_provider.fetch(
         PilgrimagePointQuery(subject_id="328609", provider="fixture")
     )
@@ -113,6 +123,7 @@ def test_fixture_service_composition_and_bounded_cache() -> None:
         )
     )
     assert isinstance(services.bangumi, FixtureBangumiSubjectProvider)
+    assert isinstance(services.points, FixtureAnitabiProvider)
     assert isinstance(services.ors, FixtureOpenRouteServiceProvider)
 
     cache: MemoryProviderCache[str] = MemoryProviderCache(max_items=1)
@@ -138,3 +149,39 @@ def test_fixture_service_composition_and_bounded_cache() -> None:
     )
     assert cache.get(first, now=now) is None
     assert cache.get(second, now=now + timedelta(minutes=2)) is None
+
+
+def test_live_bangumi_mode_is_independent_from_other_provider_fixtures() -> None:
+    services = ProviderServices(
+        Settings(
+            _env_file=None,
+            provider_mode="fixture",
+            BANGUMI_MODE="live",
+            BANGUMI_USER_AGENT="fixture-agent/1.0",
+        )
+    )
+
+    assert isinstance(services.bangumi, BangumiSubjectProvider)
+    assert isinstance(services.ors, FixtureOpenRouteServiceProvider)
+    assert isinstance(services.weather, FixtureOpenMeteoProvider)
+    assert isinstance(services.flights, FixtureSearchApiFlightProvider)
+
+
+def test_uppercase_live_mode_composes_real_provider_implementations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROVIDER_MODE", "live")
+    monkeypatch.setenv("BANGUMI_MODE", "live")
+    monkeypatch.setenv("BANGUMI_ACCESS_TOKEN", "contract-sentinel")
+    monkeypatch.setenv("ORS_API_KEY", "contract-sentinel")
+    monkeypatch.setenv("SEARCHAPI_API_KEY", "contract-sentinel")
+    settings = Settings(_env_file=None, PILGRIMAGE_POINT_MODE="fixture")
+
+    services = ProviderServices(settings)
+
+    assert settings.provider_mode == "live"
+    assert settings.bangumi_mode == "live"
+    assert isinstance(services.bangumi, BangumiSubjectProvider)
+    assert isinstance(services.ors, OpenRouteServiceProvider)
+    assert isinstance(services.weather, OpenMeteoProvider)
+    assert isinstance(services.flights, SearchApiFlightProvider)

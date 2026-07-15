@@ -13,6 +13,7 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
+COPY fixtures ./fixtures
 RUN uv sync --frozen --no-dev --no-editable
 
 ENV PATH="/opt/venv/bin:$PATH"
@@ -20,4 +21,3 @@ USER app
 EXPOSE 8001
 HEALTHCHECK --interval=20s --timeout=3s --retries=3 CMD ["python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',8001),2); s.close()"]
 CMD ["python", "-m", "pilgrimage_agent.mcp.server"]
-

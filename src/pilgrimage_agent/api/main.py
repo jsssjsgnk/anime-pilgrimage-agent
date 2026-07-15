@@ -1,51 +1,148 @@
 """HTTP API entrypoint."""
 
+import re
+from asyncio import Lock
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import UTC, datetime
+from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from anyio import to_thread
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command, Interrupt
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from pilgrimage_agent import __version__
+from pilgrimage_agent.agent.conversation import (
+    ConversationResponder,
+    DeterministicConversationAgent,
+    LlmConversationAgent,
+    ResilientConversationAgent,
+    context_from_workflow,
+    context_from_workspace,
+)
+from pilgrimage_agent.agent.conversation_memory import (
+    SUMMARY_TRIGGER,
+    build_prompt_window,
+    build_summary,
+    classify_memory_kind,
+)
 from pilgrimage_agent.agent.graph import WorkflowGraph, WorkflowState, build_workflow
+from pilgrimage_agent.agent.knowledge import SqlKnowledgeRetriever
+from pilgrimage_agent.agent.llm import (
+    JsonChatClient,
+    LlmKnowledgeRuleProposer,
+    LlmRequirementExtractor,
+    LlmReviewer,
+    LlmWorkspaceReplanner,
+    ResilientRequirementExtractor,
+    ResilientReviewer,
+)
+from pilgrimage_agent.agent.mcp_client import LangChainMcpToolClient
+from pilgrimage_agent.agent.review import FixtureReviewer
 from pilgrimage_agent.agent.schemas import (
     ConfirmationRequest,
+    ConversationAction,
+    ConversationEventPayload,
+    ConversationIntent,
+    ConversationMessage,
+    ConversationPromptWindow,
+    ConversationRequest,
+    ConversationResponse,
+    ConversationSummaryPayload,
+    ModifyWorkflowRequest,
+    PlanModification,
     ResumeWorkflowRequest,
     StartWorkflowRequest,
     WorkflowResponse,
     WorkflowStatus,
 )
-from pilgrimage_agent.config import get_settings
+from pilgrimage_agent.agent.workspace import (
+    ClearWorkspaceDayRequest,
+    ConfirmWorkspaceSubjectsRequest,
+    PlanWorkspaceRequest,
+    WorkspaceAgent,
+    WorkspaceEvidenceView,
+    WorkspaceMutationRequest,
+    WorkspacePatchPreview,
+    WorkspaceStartRequest,
+    WorkspaceState,
+    WorkspaceStatus,
+    WorkspaceView,
+    workspace_view,
+)
+from pilgrimage_agent.agent.workspace_graph import (
+    WorkspaceGraph,
+    WorkspaceGraphState,
+    build_workspace_graph,
+)
+from pilgrimage_agent.config import ProviderRuntimeDiagnostic, get_settings
 from pilgrimage_agent.db import session_scope
 from pilgrimage_agent.domain.models import (
     ConfirmedSubject,
     PilgrimagePointQuery,
     RouteA,
+    SubjectCandidate,
+    SubjectIntent,
     SubjectSearchQuery,
     SubjectSearchResult,
+    TripRequest,
+    WeatherForecastResult,
 )
-from pilgrimage_agent.domain.planning import PlanningOptions, RouteBPlan, RouteBRequest
-from pilgrimage_agent.memory.schemas import StoredTrip
-from pilgrimage_agent.memory.store import SqlProjectStore
-from pilgrimage_agent.planning.demo import fixture_route_a, plan_demo_route_b, planning_options
+from pilgrimage_agent.domain.planning import (
+    PlanningOptions,
+    RouteBPlan,
+    RouteBRequest,
+    ValidationIssue,
+)
+from pilgrimage_agent.domain.workspace import (
+    DerivedKnowledgeRule,
+    KnowledgeOperation,
+    PlanPatch,
+    SubjectIntentOperation,
+)
+from pilgrimage_agent.memory.schemas import StoredEvent, StoredPreference, StoredTrip
+from pilgrimage_agent.memory.store import ProjectStore, SqlProjectStore
+from pilgrimage_agent.memory.workspace_repository import SqlWorkspaceRepository
+from pilgrimage_agent.planning.demo import plan_demo_route_b, planning_options
+from pilgrimage_agent.planning.modification import (
+    parse_local_modification,
+    replan_local_walking,
+)
+from pilgrimage_agent.planning.patches import (
+    ApplyPlanPatchRequest,
+    DirectPlanPatchRequest,
+    NaturalLanguagePatchRequest,
+    PlanPatchPreview,
+    parse_patch_instruction,
+)
 from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.points import build_route_a
 from pilgrimage_agent.providers.service import get_provider_services
-from pilgrimage_agent.rag.embedding import FixtureE5Embedder
+from pilgrimage_agent.rag.embedding import (
+    EmbeddingProvider,
+    FixtureE5Embedder,
+    LazySentenceTransformerE5Embedder,
+)
 from pilgrimage_agent.rag.evaluation import evaluate
 from pilgrimage_agent.rag.fixtures import load_fixture_index
 from pilgrimage_agent.rag.ingestion import ingest_document
+from pilgrimage_agent.rag.rules import (
+    AcceptKnowledgeRuleRequest,
+    WorkspaceKnowledgeRuleRequest,
+    accept_derived_rule,
+    validate_derived_rule,
+)
 from pilgrimage_agent.rag.schemas import (
     IngestedDocument,
     KnowledgeDeleteResponse,
@@ -73,12 +170,312 @@ class CapabilityResponse(BaseModel):
     capabilities: dict[str, bool]
 
 
+_WORK_COLLECTION_MESSAGE = re.compile(
+    r"^\s*(?:请)?\s*(添加|加入|增加|再加|移除|删除|去掉)\s*(?:作品)?\s*"
+    r"(?:[\u300a\u300c\u300e\u3010]"
+    r"([^\u300b\u300d\u300f\u3011]{1,100})"
+    r"[\u300b\u300d\u300f\u3011]|([^\u3002.!\uff01]{1,100}))"
+    r"\s*[\u3002.!\uff01]?\s*$"
+)
+
+
+def _collection_patch_from_message(
+    state: WorkspaceState, message: str, idempotency_key: str
+) -> PlanPatch | None:
+    match = _WORK_COLLECTION_MESSAGE.fullmatch(message)
+    if match is None:
+        return None
+    verb = match.group(1)
+    query = (match.group(2) or match.group(3) or "").strip()
+    if not query:
+        raise ValueError("请告诉我要添加或移除的作品名称")
+    adding = verb in {"添加", "加入", "增加", "再加"}
+    if adding:
+        if len(state.requirements.subject_intents) >= 12:
+            raise ValueError("一个工作区最多管理十二部作品")
+        if any(
+            item.query.casefold() == query.casefold() for item in state.requirements.subject_intents
+        ):
+            raise ValueError("这部作品已经在当前巡礼中")
+        operation = SubjectIntentOperation(
+            action="add",
+            intent=SubjectIntent(query=query, priority=3, is_primary=False),
+        )
+        rationale = f"添加作品《{query}》并核对匹配条目"
+    else:
+        if len(state.requirements.subject_intents) == 1:
+            raise ValueError("当前巡礼至少需要保留一部作品")
+        names_by_intent: dict[UUID, set[str]] = {
+            item.intent_id: {item.query.casefold()} for item in state.requirements.subject_intents
+        }
+        for confirmed in state.confirmed_subjects:
+            names_by_intent.setdefault(confirmed.intent_id, set()).update(
+                name.casefold()
+                for name in (
+                    confirmed.subject.name,
+                    confirmed.subject.name_cn,
+                    *confirmed.subject.aliases,
+                )
+                if name
+            )
+        normalized_query = query.casefold()
+        intent_id = next(
+            (key for key, names in names_by_intent.items() if normalized_query in names),
+            None,
+        )
+        if intent_id is None:
+            raise ValueError("当前巡礼中没有找到这部作品")
+        operation = SubjectIntentOperation(action="remove", intent_id=intent_id)
+        rationale = f"从本次巡礼中移除《{query}》"
+    return PlanPatch(
+        patch_id=uuid4(),
+        trip_id=state.trip_id,
+        expected_base_version=state.state_version,
+        rationale=rationale,
+        requires_confirmation=True,
+        idempotency_key=idempotency_key,
+        created_at=datetime.now(UTC),
+        operations=(operation,),
+    )
+
+
+class RuntimeDiagnosticsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    providers: dict[str, ProviderRuntimeDiagnostic]
+
+
+class WorkspaceConversationResponse(BaseModel):
+    """Persisted workspace transcript plus an optional typed change preview."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trip_id: UUID
+    messages: tuple[ConversationMessage, ...] = Field(max_length=50)
+    assistant_message: ConversationMessage
+    workspace: WorkspaceView
+    preview: PlanPatchPreview | None = None
+
+
+class PreferenceWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner_user_id: str = Field(min_length=1, max_length=120)
+    value: object
+    explicit_consent: Literal[True]
+
+
+class PreferenceDeleteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deleted_count: int = Field(ge=0)
+
+
+class WorkspaceDeleteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trip_id: UUID
+    deleted: Literal[True]
+
+
+class ApplicationResources:
+    """Reusable process resources; external connections are opened lazily."""
+
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self.engine = create_async_engine(
+            self.settings.database_url.get_secret_value(), pool_pre_ping=True
+        )
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.rag_repository = SqlRagRepository(
+            self.sessions,
+            _rag_embedder(),
+            bm25_root=self.settings.rag_bm25_index_dir,
+        )
+        self.store = SqlProjectStore(self.sessions)
+        self.tool_client = LangChainMcpToolClient(
+            url=self.settings.mcp_tools_url,
+            timeout_seconds=self.settings.provider_timeout_seconds,
+        )
+        self.chat_client: JsonChatClient | None = None
+        self.requirement_extractor = None
+        self.reviewer = None
+        self.workspace_reviewer = None
+        self.workspace_replanner = None
+        self.knowledge_rule_proposer = None
+        self.conversation_responder: ConversationResponder = DeterministicConversationAgent()
+        if self.settings.llm_api_key and self.settings.llm_base_url and self.settings.llm_model:
+            self.chat_client = JsonChatClient(
+                base_url=self.settings.llm_base_url,
+                model=self.settings.llm_model,
+                api_key=self.settings.llm_api_key.get_secret_value(),
+                timeout_seconds=self.settings.provider_timeout_seconds,
+                max_attempts=self.settings.provider_max_attempts,
+            )
+            self.requirement_extractor = ResilientRequirementExtractor(
+                LlmRequirementExtractor(self.chat_client)
+            )
+            self.workspace_reviewer = LlmReviewer(self.chat_client)
+            self.workspace_replanner = LlmWorkspaceReplanner(self.chat_client)
+            self.knowledge_rule_proposer = LlmKnowledgeRuleProposer(self.chat_client)
+            self.reviewer = ResilientReviewer(self.workspace_reviewer, FixtureReviewer())
+            self.conversation_responder = ResilientConversationAgent(
+                LlmConversationAgent(self.chat_client)
+            )
+        self.workspace_agent = WorkspaceAgent(
+            self.tool_client,
+            self.requirement_extractor,
+            SqlKnowledgeRetriever(self.rag_repository),
+            self.knowledge_rule_proposer,
+        )
+        self._graph: WorkflowGraph | None = None
+        self._workspace_graph: WorkspaceGraph | None = None
+        self._checkpoint_context: AbstractAsyncContextManager[AsyncPostgresSaver] | None = None
+        self._graph_lock = Lock()
+
+    async def workflow_graph(self) -> WorkflowGraph:
+        """Initialize checkpoint tables once, on the first workflow operation."""
+
+        if self._graph is not None:
+            return self._graph
+        async with self._graph_lock:
+            if self._graph is not None:
+                return self._graph
+            checkpoint_url = self.settings.database_url.get_secret_value().replace(
+                "postgresql+asyncpg://", "postgresql://", 1
+            )
+            checkpoint_context = AsyncPostgresSaver.from_conn_string(checkpoint_url)
+            checkpointer = await checkpoint_context.__aenter__()
+            try:
+                await checkpointer.setup()
+                self._graph = build_workflow(
+                    checkpointer,
+                    tool_client=self.tool_client,
+                    requirement_extractor=self.requirement_extractor,
+                    reviewer=self.reviewer,
+                    knowledge_retriever=SqlKnowledgeRetriever(self.rag_repository),
+                )
+                self._workspace_graph = build_workspace_graph(
+                    self.workspace_agent,
+                    checkpointer,
+                    reviewer=self.workspace_reviewer,
+                    replanner=self.workspace_replanner,
+                    reviewer_source="llm",
+                )
+            except BaseException:
+                await checkpoint_context.__aexit__(None, None, None)
+                raise
+            self._checkpoint_context = checkpoint_context
+            return self._graph
+
+    async def workspace_graph(self) -> WorkspaceGraph:
+        """Return the authoritative product graph using the shared checkpointer."""
+
+        await self.workflow_graph()
+        assert self._workspace_graph is not None
+        return self._workspace_graph
+
+    async def close(self) -> None:
+        if self._checkpoint_context is not None:
+            await self._checkpoint_context.__aexit__(None, None, None)
+        if self.chat_client is not None:
+            await self.chat_client.close()
+        await self.engine.dispose()
+
+
+@asynccontextmanager
+async def _app_lifespan(application: FastAPI) -> AsyncIterator[None]:
+    resources = ApplicationResources()
+    application.state.resources = resources
+    try:
+        yield
+    finally:
+        await resources.close()
+
+
 app = FastAPI(
     title="Anime Pilgrimage Agent API",
     version=__version__,
     description="Read-only planning API; booking and payment are intentionally unsupported.",
+    lifespan=_app_lifespan,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_request_validation_error(
+    _request: Request, _error: RequestValidationError
+) -> JSONResponse:
+    """Keep schema locations and submitted values out of consumer error responses."""
+
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Request body does not match the required structure."},
+    )
+
+
 RAG_FIXTURE_ROOT = Path.cwd() / "fixtures" / "rag"
+CONVERSATION_EVENT = "conversation_message"
+CONVERSATION_SUMMARY_EVENT = "conversation_summary"
+CONVERSATION_LIMIT = 50
+
+
+def _configured_conversation_responder() -> ConversationResponder:
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        return resources.conversation_responder
+    return DeterministicConversationAgent()
+
+
+def _is_workspace_flight_question(message: str) -> bool:
+    normalized = message.casefold()
+    return any(term in normalized for term in ("机票", "航班", "飞机", "flight"))
+
+
+def _can_query_workspace_flights(state: WorkspaceState) -> bool:
+    requirements = state.requirements
+    return bool(
+        requirements.origin_iata
+        and requirements.destination_iata
+        and requirements.start_date
+    )
+
+
+def _has_flight_snapshot(state: WorkspaceState) -> bool:
+    return any(item.kind == "flight" for item in state.provider_snapshots)
+
+
+async def _answer_workspace_question(
+    store: ProjectStore,
+    state: WorkspaceState,
+    message: str,
+) -> tuple[ConversationIntent, str, ConversationAction]:
+    window = await _conversation_prompt_window(store, state.owner_user_id, state.trip_id)
+    decision = await _configured_conversation_responder().respond(
+        context_from_workspace(state),
+        window.recent_messages[:-1],
+        message,
+        memory_summary=window.summary,
+        critical_decisions=window.critical_decisions,
+    )
+    if decision.modification is not None:
+        return (
+            ConversationIntent.UNSUPPORTED_CHANGE,
+            (
+                f"我理解你的目标是: {decision.answer} "
+                "这项按天修改还不能安全生成影响预览, 所以当前行程没有改变。"
+            )[:2000],
+            ConversationAction(kind="unsupported_change"),
+        )
+    action = ConversationAction(
+        kind=(
+            "confirmation_required"
+            if decision.intent is ConversationIntent.CONFIRMATION_HELP
+            else "unsupported_change"
+            if decision.intent is ConversationIntent.UNSUPPORTED_CHANGE
+            else "none"
+        )
+    )
+    return decision.intent, decision.answer, action
 
 
 def _evaluate_fixture_knowledge() -> RagEvaluationReport:
@@ -97,36 +494,263 @@ def _checkpoint_url() -> str:
 
 
 def _checkpoint_thread(owner_user_id: str, thread_id: str, trip_id: UUID) -> str:
-    namespace = f"{owner_user_id}\x1f{thread_id}\x1f{trip_id}"
+    namespace = f"workspace-v2\x1f{owner_user_id}\x1f{thread_id}\x1f{trip_id}"
     return sha256(namespace.encode()).hexdigest()
+
+
+@lru_cache
+def _rag_embedder() -> EmbeddingProvider:
+    if get_settings().rag_embedding_mode == "real":
+        return LazySentenceTransformerE5Embedder()
+    return FixtureE5Embedder()
 
 
 @asynccontextmanager
 async def _workflow_runtime() -> AsyncIterator[tuple[WorkflowGraph, SqlProjectStore]]:
-    """Open bounded checkpoint/store resources for one HTTP operation."""
+    """Reuse lifespan resources, with a bounded fallback for direct unit calls."""
 
-    database_url = get_settings().database_url.get_secret_value()
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield await resources.workflow_graph(), resources.store
+        return
+
+    settings = get_settings()
+    database_url = settings.database_url.get_secret_value()
     engine = create_async_engine(database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
+    rag_repository = SqlRagRepository(
+        sessions, _rag_embedder(), bm25_root=settings.rag_bm25_index_dir
+    )
+    chat_client: JsonChatClient | None = None
+    requirement_extractor = None
+    reviewer = None
+    if settings.llm_api_key and settings.llm_base_url and settings.llm_model:
+        chat_client = JsonChatClient(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.llm_api_key.get_secret_value(),
+            timeout_seconds=settings.provider_timeout_seconds,
+            max_attempts=settings.provider_max_attempts,
+        )
+        requirement_extractor = ResilientRequirementExtractor(LlmRequirementExtractor(chat_client))
+        reviewer = ResilientReviewer(LlmReviewer(chat_client), FixtureReviewer())
     try:
         async with AsyncPostgresSaver.from_conn_string(_checkpoint_url()) as checkpointer:
             await checkpointer.setup()
-            yield build_workflow(checkpointer), SqlProjectStore(sessions)
+            yield (
+                build_workflow(
+                    checkpointer,
+                    tool_client=LangChainMcpToolClient(
+                        url=settings.mcp_tools_url,
+                        timeout_seconds=settings.provider_timeout_seconds,
+                    ),
+                    requirement_extractor=requirement_extractor,
+                    reviewer=reviewer,
+                    knowledge_retriever=SqlKnowledgeRetriever(rag_repository),
+                ),
+                SqlProjectStore(sessions),
+            )
     finally:
+        if chat_client is not None:
+            await chat_client.close()
         await engine.dispose()
 
 
 @asynccontextmanager
 async def _knowledge_repository() -> AsyncIterator[SqlRagRepository]:
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield resources.rag_repository
+        return
     settings = get_settings()
     database_url = settings.database_url.get_secret_value()
     engine = create_async_engine(database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     try:
-        yield SqlRagRepository(
-            sessions, FixtureE5Embedder(), bm25_root=settings.rag_bm25_index_dir
-        )
+        yield SqlRagRepository(sessions, _rag_embedder(), bm25_root=settings.rag_bm25_index_dir)
     finally:
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def _project_store() -> AsyncIterator[SqlProjectStore]:
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield resources.store
+        return
+    engine = create_async_engine(get_settings().database_url.get_secret_value(), pool_pre_ping=True)
+    try:
+        yield SqlProjectStore(async_sessionmaker(engine, expire_on_commit=False))
+    finally:
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def _workspace_runtime() -> AsyncIterator[tuple[WorkspaceAgent, ProjectStore]]:
+    """Reuse the process Agent and project-owned store for one workspace operation."""
+
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield resources.workspace_agent, resources.store
+        return
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url.get_secret_value(), pool_pre_ping=True)
+    try:
+        agent = WorkspaceAgent(
+            LangChainMcpToolClient(
+                url=settings.mcp_tools_url,
+                timeout_seconds=settings.provider_timeout_seconds,
+            )
+        )
+        yield agent, SqlProjectStore(async_sessionmaker(engine, expire_on_commit=False))
+    finally:
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def _workspace_graph_runtime() -> AsyncIterator[tuple[WorkspaceGraph, ProjectStore]]:
+    """Run Workspace operations through the durable product LangGraph."""
+
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield await resources.workspace_graph(), resources.store
+        return
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url.get_secret_value(), pool_pre_ping=True)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    rag_repository = SqlRagRepository(
+        sessions, _rag_embedder(), bm25_root=settings.rag_bm25_index_dir
+    )
+    chat_client: JsonChatClient | None = None
+    reviewer = None
+    replanner = None
+    extractor = None
+    knowledge_rule_proposer = None
+    if settings.llm_api_key and settings.llm_base_url and settings.llm_model:
+        chat_client = JsonChatClient(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.llm_api_key.get_secret_value(),
+            timeout_seconds=settings.provider_timeout_seconds,
+            max_attempts=settings.provider_max_attempts,
+        )
+        reviewer = LlmReviewer(chat_client)
+        replanner = LlmWorkspaceReplanner(chat_client)
+        extractor = ResilientRequirementExtractor(LlmRequirementExtractor(chat_client))
+        knowledge_rule_proposer = LlmKnowledgeRuleProposer(chat_client)
+    agent = WorkspaceAgent(
+        LangChainMcpToolClient(
+            url=settings.mcp_tools_url,
+            timeout_seconds=settings.provider_timeout_seconds,
+        ),
+        extractor,
+        SqlKnowledgeRetriever(rag_repository),
+        knowledge_rule_proposer,
+    )
+    try:
+        async with AsyncPostgresSaver.from_conn_string(_checkpoint_url()) as checkpointer:
+            await checkpointer.setup()
+            yield (
+                build_workspace_graph(
+                    agent,
+                    checkpointer,
+                    reviewer=reviewer,
+                    replanner=replanner,
+                ),
+                SqlProjectStore(sessions),
+            )
+    finally:
+        if chat_client is not None:
+            await chat_client.close()
+        await engine.dispose()
+
+
+def _workspace_graph_config(owner_user_id: str, thread_id: str, trip_id: UUID) -> RunnableConfig:
+    return {
+        "configurable": {
+            "thread_id": _checkpoint_thread(owner_user_id, thread_id, trip_id),
+        }
+    }
+
+
+async def _rebase_subject_confirmation(
+    graph: WorkspaceGraph, state: WorkspaceState
+) -> None:
+    """Move an upstream-edited workspace back to its typed subject interrupt."""
+
+    config = _workspace_graph_config(
+        state.owner_user_id,
+        state.thread_id,
+        state.trip_id,
+    )
+    updated_config = await graph.aupdate_state(
+        config,
+        {
+            "workspace": state.model_dump(mode="json"),
+            "phase": "subject_agent",
+        },
+        as_node="subject_agent",
+    )
+    # Execute only the next node so LangGraph durably records a fresh subject
+    # interrupt.  The explicit API confirmation will resume it later.
+    await graph.ainvoke(None, updated_config)
+
+
+async def _rebase_plan_confirmation(
+    graph: WorkspaceGraph, state: WorkspaceState
+) -> None:
+    """Move a database-newer workspace to its typed access/base interrupt."""
+
+    config = _workspace_graph_config(
+        state.owner_user_id,
+        state.thread_id,
+        state.trip_id,
+    )
+    updated_config = await graph.aupdate_state(
+        config,
+        {
+            "workspace": state.model_dump(mode="json"),
+            "phase": "access_agent",
+        },
+        as_node="access_agent",
+    )
+    # Record the typed planning interrupt before the caller resumes it. This
+    # also repairs workspaces whose persisted PlanPatch is newer than the graph.
+    await graph.ainvoke(None, updated_config)
+
+
+def _workspace_from_graph(result: object) -> WorkspaceState:
+    raw = cast(WorkspaceGraphState, result)
+    return WorkspaceState.model_validate(raw["workspace"])
+
+
+@asynccontextmanager
+async def _conversation_runtime() -> AsyncIterator[tuple[ConversationResponder, SqlProjectStore]]:
+    """Open one bounded conversation operation with an optional structured LLM."""
+
+    resources = cast(ApplicationResources | None, getattr(app.state, "resources", None))
+    if resources is not None:
+        yield resources.conversation_responder, resources.store
+        return
+
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url.get_secret_value(), pool_pre_ping=True)
+    client: JsonChatClient | None = None
+    responder: ConversationResponder = DeterministicConversationAgent()
+    if settings.llm_api_key and settings.llm_base_url and settings.llm_model:
+        client = JsonChatClient(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.llm_api_key.get_secret_value(),
+            timeout_seconds=settings.provider_timeout_seconds,
+            max_attempts=settings.provider_max_attempts,
+        )
+        responder = ResilientConversationAgent(LlmConversationAgent(client))
+    try:
+        yield responder, SqlProjectStore(async_sessionmaker(engine, expire_on_commit=False))
+    finally:
+        if client is not None:
+            await client.close()
         await engine.dispose()
 
 
@@ -150,6 +774,43 @@ def _workflow_response(result: WorkflowState) -> WorkflowResponse:
         revision_count=result.get("revision_count", 0),
         warnings=result.get("warnings", ()),
         plan_day_hashes=result.get("plan_day_hashes", ()),
+        requirements=(
+            TripRequest.model_validate(result["requirements"]) if "requirements" in result else None
+        ),
+        requirement_source=cast(
+            Literal["provided", "llm", "deterministic_fallback"] | None,
+            result.get("requirement_source"),
+        ),
+        requirement_assumptions=result.get("requirement_assumptions", ()),
+        effective_walking_limit=result.get("effective_walking_limit"),
+        applied_preference_keys=result.get("applied_preference_keys", ()),
+        subject_candidates=tuple(
+            SubjectCandidate.model_validate(item) for item in result.get("subject_candidates", ())
+        ),
+        confirmed_subject=(
+            ConfirmedSubject.model_validate(result["confirmed_subject"])
+            if "confirmed_subject" in result
+            else None
+        ),
+        route_a=(RouteA.model_validate(result["route_a"]) if "route_a" in result else None),
+        planning_options=(
+            PlanningOptions.model_validate(result["planning_options"])
+            if "planning_options" in result
+            else None
+        ),
+        route_b=(RouteBPlan.model_validate(result["route_b"]) if "route_b" in result else None),
+        weather=(
+            WeatherForecastResult.model_validate(result["weather"]) if "weather" in result else None
+        ),
+        knowledge=(
+            KnowledgeSearchResult.model_validate(result["knowledge"])
+            if "knowledge" in result
+            else None
+        ),
+        validation_issues=tuple(
+            ValidationIssue.model_validate(item) for item in result.get("validation_issues", ())
+        ),
+        reviewer_explanation=result.get("reviewer_explanation"),
     )
 
 
@@ -169,6 +830,198 @@ async def _save_workflow(
         response.trip_id,
         "workflow_transition",
         {"phase": response.phase, "status": response.status.value},
+    )
+
+
+async def _save_workspace(store: ProjectStore, state: WorkspaceState, event_type: str) -> None:
+    await store.save_trip(
+        StoredTrip(
+            trip_id=state.trip_id,
+            owner_user_id=state.owner_user_id,
+            thread_id=state.thread_id,
+            state=cast(dict[str, object], state.model_dump(mode="json")),
+        )
+    )
+    if isinstance(store, SqlProjectStore):
+        await SqlWorkspaceRepository(store.sessions).save_projection(state)
+    await store.append_event(
+        state.owner_user_id,
+        state.trip_id,
+        event_type,
+        {
+            "schema_version": state.schema_version,
+            "state_version": state.state_version,
+            "status": state.status.value,
+        },
+    )
+
+
+async def _load_workspace(
+    store: ProjectStore,
+    owner_user_id: str,
+    thread_id: str,
+    trip_id: UUID,
+) -> WorkspaceState:
+    trip = await store.get_trip(owner_user_id, thread_id, trip_id)
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Workspace was not found in this namespace")
+    try:
+        return WorkspaceState.model_validate(trip.state)
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="This trip uses the legacy workflow schema, not workspace schema v2",
+        ) from error
+
+
+def _workspace_value_error(error: ValueError) -> HTTPException:
+    detail = str(error)
+    conflict_markers = (
+        "version conflict",
+        "namespace mismatch",
+        "must belong",
+        "requires explicit confirmation",
+    )
+    status_code = 409 if any(item in detail for item in conflict_markers) else 422
+    return HTTPException(status_code=status_code, detail=detail)
+
+
+def _conversation_message(event: StoredEvent) -> ConversationMessage | None:
+    """Validate a persisted chat event without trusting arbitrary historical JSON."""
+
+    if event.event_type != CONVERSATION_EVENT:
+        return None
+    try:
+        payload = ConversationEventPayload.model_validate(event.payload)
+    except ValidationError:
+        return None
+    message = ConversationMessage(
+        message_id=event.event_id,
+        created_at=event.created_at,
+        **payload.model_dump(mode="python"),
+    )
+    if message.memory_kind == "ordinary" and message.role == "user":
+        message = message.model_copy(
+            update={"memory_kind": classify_memory_kind(message)}
+        )
+    return message
+
+
+def _conversation_summary(event: StoredEvent) -> ConversationSummaryPayload | None:
+    if event.event_type != CONVERSATION_SUMMARY_EVENT:
+        return None
+    try:
+        return ConversationSummaryPayload.model_validate(event.payload)
+    except ValidationError:
+        return None
+
+
+async def _conversation_prompt_window(
+    store: ProjectStore, owner_user_id: str, trip_id: UUID
+) -> ConversationPromptWindow:
+    events = await store.list_events(owner_user_id, trip_id)
+    messages = tuple(
+        message
+        for event in events
+        if (message := _conversation_message(event)) is not None
+    )
+    summaries = tuple(
+        summary
+        for event in events
+        if (summary := _conversation_summary(event)) is not None
+    )
+    return build_prompt_window(messages, summaries[-1] if summaries else None)
+
+
+async def _maybe_summarize_conversation(
+    store: ProjectStore, owner_user_id: str, trip_id: UUID
+) -> None:
+    events = await store.list_events(owner_user_id, trip_id)
+    messages = tuple(
+        message
+        for event in events
+        if (message := _conversation_message(event)) is not None
+    )
+    summaries = tuple(
+        summary
+        for event in events
+        if (summary := _conversation_summary(event)) is not None
+    )
+    summarized_count = summaries[-1].summarized_message_count if summaries else 0
+    if len(messages) - summarized_count < SUMMARY_TRIGGER:
+        return
+    summary = build_summary(messages)
+    if summary is None or summary.summarized_message_count <= summarized_count:
+        return
+    await store.append_event(
+        owner_user_id,
+        trip_id,
+        CONVERSATION_SUMMARY_EVENT,
+        summary.model_dump(mode="json"),
+    )
+
+
+async def _list_conversation_messages(
+    store: ProjectStore, owner_user_id: str, trip_id: UUID
+) -> tuple[ConversationMessage, ...]:
+    messages = tuple(
+        message
+        for event in await store.list_events(owner_user_id, trip_id)
+        if (message := _conversation_message(event)) is not None
+    )
+    return messages[-CONVERSATION_LIMIT:]
+
+
+async def _append_conversation_message(
+    store: ProjectStore,
+    owner_user_id: str,
+    trip_id: UUID,
+    payload: ConversationEventPayload,
+) -> ConversationMessage:
+    if payload.role == "user" and payload.memory_kind == "ordinary":
+        payload = payload.model_copy(
+            update={"memory_kind": classify_memory_kind(payload.content)}
+        )
+    event = await store.append_event(
+        owner_user_id,
+        trip_id,
+        CONVERSATION_EVENT,
+        payload.model_dump(mode="json"),
+    )
+    message = _conversation_message(event)
+    if message is None:  # pragma: no cover - store contract violation
+        raise RuntimeError("Conversation event failed strict validation")
+    await _maybe_summarize_conversation(store, owner_user_id, trip_id)
+    return message
+
+
+def _modified_workflow(
+    current: WorkflowResponse, modification: PlanModification
+) -> WorkflowResponse:
+    if current.route_a is None or current.route_b is None:
+        raise ValueError("Workflow has no editable itinerary")
+    if current.revision_count >= 3:
+        raise ValueError("The three-revision limit was reached")
+    plan, warnings = replan_local_walking(current.route_b, current.route_a, modification)
+    revision = current.revision_count + 1
+    hashes = list(current.plan_day_hashes)
+    while len(hashes) < len(plan.days):
+        hashes.append("")
+    changed_index = modification.target_day - 1
+    hashes[changed_index] = sha256(
+        f"{plan.days[changed_index].model_dump_json()}|revision={revision}".encode()
+    ).hexdigest()[:16]
+    return current.model_copy(
+        update={
+            "route_b": plan,
+            "revision_count": revision,
+            "plan_day_hashes": tuple(hashes),
+            "warnings": (*current.warnings, *warnings),
+            "reviewer_explanation": (
+                f"Applied Day {modification.target_day} walking reduction of "
+                f"{modification.walking_reduction_percent}% without changing other days."
+            ),
+        }
     )
 
 
@@ -219,6 +1072,13 @@ async def capabilities() -> CapabilityResponse:
     return CapabilityResponse(capabilities=get_settings().capability_status())
 
 
+@app.get("/api/runtime/diagnostics", response_model=RuntimeDiagnosticsResponse)
+async def runtime_diagnostics() -> RuntimeDiagnosticsResponse:
+    """Expose provider selection and presence flags, never secret values."""
+
+    return RuntimeDiagnosticsResponse(providers=get_settings().provider_diagnostics())
+
+
 @app.get("/api/subjects/search", response_model=SubjectSearchResult)
 async def search_subjects(
     query: str = Query(min_length=1, max_length=200),
@@ -240,7 +1100,10 @@ async def confirm_subject(subject_id: str) -> ConfirmedSubject:
 async def route_a(subject_id: str) -> RouteA:
     services = get_provider_services()
     result = await services.points.fetch(
-        PilgrimagePointQuery(subject_id=subject_id, provider="fixture")
+        PilgrimagePointQuery(
+            subject_id=subject_id,
+            provider=get_settings().pilgrimage_point_mode,
+        )
     )
     return build_route_a(result, subject_id=subject_id)
 
@@ -252,8 +1115,587 @@ async def get_planning_options() -> PlanningOptions:
 
 @app.post("/api/subjects/{subject_id}/route-b", response_model=RouteBPlan)
 async def route_b(subject_id: str, request: RouteBRequest) -> RouteBPlan:
-    route = await fixture_route_a(subject_id)
+    # Route B must be a subset of the exact Route A provider selected for this
+    # runtime.  Falling back to the three-point fixture here made the legacy
+    # compatibility endpoint return foreign point IDs when Route A used live
+    # Anitabi data.
+    services = get_provider_services()
+    result = await services.points.fetch(
+        PilgrimagePointQuery(
+            subject_id=subject_id,
+            provider=get_settings().pilgrimage_point_mode,
+        )
+    )
+    route = build_route_a(result, subject_id=subject_id)
     return await plan_demo_route_b(route, request)
+
+
+@app.post("/api/workspaces", response_model=WorkspaceView)
+async def start_workspace(request: WorkspaceStartRequest) -> WorkspaceView:
+    """Start the multi-subject workspace without exposing raw evidence by default."""
+
+    async with _workspace_graph_runtime() as (graph, store):
+        existing = await store.get_trip(request.owner_user_id, request.thread_id, request.trip_id)
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="Workspace already exists")
+        try:
+            result = await graph.ainvoke(
+                {"start_request": request.model_dump(mode="json")},
+                _workspace_graph_config(request.owner_user_id, request.thread_id, request.trip_id),
+            )
+            state = _workspace_from_graph(result)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, state, "workspace_started")
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            state.trip_id,
+            ConversationEventPayload(
+                role="user",
+                content=request.request_summary,
+                intent=ConversationIntent.TRIP_STARTED,
+            ),
+        )
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            state.trip_id,
+            ConversationEventPayload(
+                role="assistant",
+                content="好的, 我先核对你提到的作品。确认无误后, 我会整理地点并安排每天的路线。",
+                intent=ConversationIntent.CONFIRMATION_HELP,
+                action=ConversationAction(kind="confirmation_required"),
+            ),
+        )
+    return workspace_view(state)
+
+
+@app.get("/api/workspaces/{trip_id}", response_model=WorkspaceView)
+async def get_workspace(
+    trip_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    thread_id: str = Query(min_length=1, max_length=120),
+) -> WorkspaceView:
+    async with _workspace_runtime() as (_agent, store):
+        state = await _load_workspace(store, owner_user_id, thread_id, trip_id)
+    return workspace_view(state)
+
+
+@app.get(
+    "/api/workspaces/{trip_id}/evidence",
+    response_model=WorkspaceEvidenceView,
+)
+async def get_workspace_evidence(
+    trip_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    thread_id: str = Query(min_length=1, max_length=120),
+) -> WorkspaceEvidenceView:
+    """Return the opt-in evidence inspector projection for curation work."""
+
+    async with _workspace_runtime() as (_agent, store):
+        state = await _load_workspace(store, owner_user_id, thread_id, trip_id)
+    return WorkspaceEvidenceView(
+        trip_id=state.trip_id,
+        evidence=state.evidence,
+        quarantined=state.quarantined,
+        ambiguous_merges=state.ambiguous_merges,
+    )
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/subjects/confirm",
+    response_model=WorkspaceView,
+)
+async def confirm_workspace_subjects(
+    trip_id: UUID, request: ConfirmWorkspaceSubjectsRequest
+) -> WorkspaceView:
+    async with _workspace_graph_runtime() as (graph, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            if request.expected_state_version != state.state_version:
+                raise ValueError("workspace state version conflict")
+            checkpoint_config = _workspace_graph_config(
+                request.owner_user_id,
+                request.thread_id,
+                trip_id,
+            )
+            snapshot = await graph.aget_state(checkpoint_config)
+            if "workspace" not in snapshot.values:
+                await _rebase_subject_confirmation(graph, state)
+            else:
+                checkpoint_workspace = _workspace_from_graph(snapshot.values)
+                if checkpoint_workspace.state_version != state.state_version:
+                    raise ValueError("workspace graph checkpoint version conflict")
+            result = await graph.ainvoke(
+                Command(resume=request.model_dump(mode="json")),
+                checkpoint_config,
+            )
+            updated = _workspace_from_graph(result)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_subjects_confirmed")
+    return workspace_view(updated)
+
+
+@app.post("/api/workspaces/{trip_id}/plan", response_model=WorkspaceView)
+async def plan_workspace(trip_id: UUID, request: PlanWorkspaceRequest) -> WorkspaceView:
+    async with _workspace_graph_runtime() as (graph, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            if request.expected_state_version != state.state_version:
+                raise ValueError("workspace state version conflict")
+            checkpoint_config = _workspace_graph_config(
+                request.owner_user_id,
+                request.thread_id,
+                trip_id,
+            )
+            snapshot = await graph.aget_state(checkpoint_config)
+            checkpoint_workspace = (
+                _workspace_from_graph(snapshot.values)
+                if "workspace" in snapshot.values
+                else None
+            )
+            if (
+                checkpoint_workspace is None
+                or checkpoint_workspace.state_version != state.state_version
+                or snapshot.next != ("confirm_access_and_base",)
+            ):
+                await _rebase_plan_confirmation(graph, state)
+            result = await graph.ainvoke(
+                Command(resume=request.model_dump(mode="json")),
+                checkpoint_config,
+            )
+            updated = _workspace_from_graph(result)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_planned")
+    return workspace_view(updated)
+
+
+@app.post("/api/workspaces/{trip_id}/schedule/clear", response_model=WorkspaceView)
+async def clear_workspace_schedule(
+    trip_id: UUID, request: WorkspaceMutationRequest
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            updated = agent.clear_schedule(state, request)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_schedule_cleared")
+    return workspace_view(updated)
+
+
+@app.post("/api/workspaces/{trip_id}/days/{day_number}/clear", response_model=WorkspaceView)
+async def clear_workspace_day(
+    trip_id: UUID, day_number: int, request: WorkspaceMutationRequest
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            updated = agent.clear_day(
+                state,
+                ClearWorkspaceDayRequest(**request.model_dump(), day_number=day_number),
+            )
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_day_cleared")
+    return workspace_view(updated)
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/itineraries/{itinerary_id}/restore",
+    response_model=WorkspaceView,
+)
+async def restore_workspace_itinerary(
+    trip_id: UUID, itinerary_id: UUID, request: WorkspaceMutationRequest
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            updated = agent.restore_itinerary(state, request, itinerary_id)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_itinerary_restored")
+    return workspace_view(updated)
+
+
+@app.delete(
+    "/api/workspaces/{trip_id}/itineraries/{itinerary_id}",
+    response_model=WorkspaceView,
+)
+async def delete_workspace_itinerary(
+    trip_id: UUID, itinerary_id: UUID, request: WorkspaceMutationRequest
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            updated = agent.delete_itinerary_version(state, request, itinerary_id)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_itinerary_deleted")
+    return workspace_view(updated)
+
+
+@app.post("/api/workspaces/{trip_id}/archive", response_model=WorkspaceView)
+async def archive_workspace(trip_id: UUID, request: WorkspaceMutationRequest) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            updated = agent.archive_workspace(state, request)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_archived")
+    return workspace_view(updated)
+
+
+@app.delete("/api/workspaces/{trip_id}", response_model=WorkspaceDeleteResponse)
+async def delete_workspace(
+    trip_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    thread_id: str = Query(min_length=1, max_length=120),
+) -> WorkspaceDeleteResponse:
+    async with _workspace_graph_runtime() as (graph, store):
+        state = await _load_workspace(store, owner_user_id, thread_id, trip_id)
+        checkpoint_thread_id = _checkpoint_thread(
+            state.owner_user_id, state.thread_id, state.trip_id
+        )
+        deleted = await store.delete_trip(
+            owner_user_id,
+            thread_id,
+            trip_id,
+            checkpoint_thread_id=(
+                checkpoint_thread_id if isinstance(store, SqlProjectStore) else None
+            ),
+        )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        checkpointer = graph.checkpointer
+        if (
+            not isinstance(store, SqlProjectStore)
+            and checkpointer is not None
+            and not isinstance(checkpointer, bool)
+        ):
+            await checkpointer.adelete_thread(checkpoint_thread_id)
+    return WorkspaceDeleteResponse(trip_id=trip_id, deleted=True)
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/patches/preview",
+    response_model=WorkspacePatchPreview,
+)
+async def preview_workspace_patch(
+    trip_id: UUID, request: DirectPlanPatchRequest
+) -> WorkspacePatchPreview:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            updated, preview = agent.propose_patch(state, request.patch)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_patch_proposed")
+    return WorkspacePatchPreview(workspace=workspace_view(updated), preview=preview)
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/patches/parse",
+    response_model=WorkspacePatchPreview,
+)
+async def parse_workspace_patch(
+    trip_id: UUID, request: NaturalLanguagePatchRequest
+) -> WorkspacePatchPreview:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            patch = parse_patch_instruction(
+                trip_id=trip_id,
+                expected_base_version=request.expected_base_version,
+                instruction=request.instruction,
+                idempotency_key=request.idempotency_key,
+            )
+            updated, preview = agent.propose_patch(state, patch)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_patch_proposed")
+    return WorkspacePatchPreview(workspace=workspace_view(updated), preview=preview)
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/patches/{patch_id}/apply",
+    response_model=WorkspaceView,
+)
+async def apply_workspace_patch(
+    trip_id: UUID,
+    patch_id: UUID,
+    request: ApplyPlanPatchRequest,
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            updated = await agent.apply_patch(state, patch_id, confirm=request.confirm)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        if updated.status is WorkspaceStatus.AWAITING_SUBJECTS:
+            async with _workspace_graph_runtime() as (graph, _graph_store):
+                await _rebase_subject_confirmation(graph, updated)
+        await _save_workspace(store, updated, "workspace_patch_applied")
+    return workspace_view(updated)
+
+
+@app.get(
+    "/api/workspaces/{trip_id}/messages",
+    response_model=tuple[ConversationMessage, ...],
+)
+async def list_workspace_messages(
+    trip_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    thread_id: str = Query(min_length=1, max_length=120),
+) -> tuple[ConversationMessage, ...]:
+    """Restore the project-owned, trip-scoped workspace transcript."""
+
+    async with _workspace_runtime() as (_agent, store):
+        await _load_workspace(store, owner_user_id, thread_id, trip_id)
+        return await _list_conversation_messages(store, owner_user_id, trip_id)
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/messages",
+    response_model=WorkspaceConversationResponse,
+)
+async def send_workspace_message(
+    trip_id: UUID, request: ConversationRequest
+) -> WorkspaceConversationResponse:
+    """Turn a persisted message into status guidance or a typed PlanPatch preview."""
+
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        user_message = await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            trip_id,
+            ConversationEventPayload(
+                role="user",
+                content=request.message,
+                intent=ConversationIntent.GENERAL,
+            ),
+        )
+        normalized = request.message.casefold()
+        preview: PlanPatchPreview | None = None
+        intent = ConversationIntent.STATUS
+        action = ConversationAction()
+        updated = state
+        try:
+            collection_patch = _collection_patch_from_message(
+                state,
+                request.message,
+                f"workspace-chat:{user_message.message_id}",
+            )
+        except ValueError as error:
+            collection_patch = None
+            intent = ConversationIntent.UNSUPPORTED_CHANGE
+            action = ConversationAction(kind="unsupported_change")
+            answer = str(error)
+        if collection_patch is not None:
+            updated, preview = agent.propose_patch(state, collection_patch)
+            await _save_workspace(store, updated, "workspace_patch_proposed")
+            intent = ConversationIntent.MODIFY_PLAN
+            action = ConversationAction(kind="confirmation_required")
+            answer = (
+                f"已理解这次修改: {preview.patch.rationale}。"
+                "确认后我会保留其他作品, 重新整理受影响的地点和行程。"
+            )
+        elif intent is ConversationIntent.UNSUPPORTED_CHANGE:
+            pass
+        elif any(term in normalized for term in ("状态", "进展", "还缺", "status")):
+            answer = (
+                f"目前已确认 {len(state.confirmed_subjects)} 部作品, 整理出 "
+                f"{len(state.places)} 个巡礼地点和 {len(state.areas)} 个游览区域。"
+                f"现在有 {len(state.itineraries)} 个可回看的行程版本。"
+            )
+        elif _is_workspace_flight_question(request.message):
+            if (
+                not state.flight_options
+                and not _has_flight_snapshot(state)
+                and _can_query_workspace_flights(state)
+            ):
+                updated = await agent.collect_access_candidates(state)
+                await _save_workspace(store, updated, "workspace_access_refreshed")
+            intent, answer, action = await _answer_workspace_question(
+                store, updated, request.message
+            )
+        elif state.itineraries:
+            try:
+                patch = parse_patch_instruction(
+                    trip_id=trip_id,
+                    expected_base_version=state.state_version,
+                    instruction=request.message,
+                    idempotency_key=f"workspace-chat:{user_message.message_id}",
+                )
+                updated, preview = agent.propose_patch(state, patch)
+                await _save_workspace(store, updated, "workspace_patch_proposed")
+                intent = ConversationIntent.MODIFY_PLAN
+                action = ConversationAction(kind="confirmation_required")
+                answer = (
+                    f"已理解这次修改: {preview.patch.rationale}。"
+                    "我会先展示它会影响哪些安排, 确认前不会改变当前行程。"
+                )
+            except ValueError:
+                intent, answer, action = await _answer_workspace_question(
+                    store, state, request.message
+                )
+        else:
+            intent, answer, action = await _answer_workspace_question(
+                store, state, request.message
+            )
+        assistant = await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            trip_id,
+            ConversationEventPayload(
+                role="assistant", content=answer, intent=intent, action=action
+            ),
+        )
+        messages = await _list_conversation_messages(store, request.owner_user_id, trip_id)
+    return WorkspaceConversationResponse(
+        trip_id=trip_id,
+        messages=messages,
+        assistant_message=assistant,
+        workspace=workspace_view(updated),
+        preview=preview,
+    )
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/knowledge/rules/propose",
+    response_model=DerivedKnowledgeRule,
+)
+async def propose_workspace_knowledge_rule(
+    trip_id: UUID, request: WorkspaceKnowledgeRuleRequest
+) -> DerivedKnowledgeRule:
+    async with _workspace_runtime() as (_agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        query = KnowledgeQuery(
+            owner_user_id=request.owner_user_id,
+            trip_id=trip_id,
+            question=request.question,
+            subject_ids=tuple(item.subject.subject_id for item in state.confirmed_subjects),
+            point_ids=tuple(
+                item.entity_id
+                for item in request.proposal.target_refs
+                if item.entity_type == "place"
+            ),
+            travel_date=state.requirements.start_date,
+        )
+        async with _knowledge_repository() as repository:
+            retrieval = await repository.search(query)
+        try:
+            rule = validate_derived_rule(
+                trip_id=trip_id,
+                proposal=request.proposal,
+                retrieval=retrieval,
+            )
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        evidence_documents = dict(state.knowledge_evidence_documents)
+        evidence_documents.update(
+            {item.evidence_id: item.document_id for item in retrieval.evidence}
+        )
+        updated = state.model_copy(
+            update={
+                "knowledge_rules": (*state.knowledge_rules, rule),
+                "knowledge_evidence_documents": evidence_documents,
+            }
+        )
+        await _save_workspace(store, updated, "workspace_knowledge_rule_proposed")
+    return rule
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/knowledge/rules/{rule_id}/accept",
+    response_model=WorkspaceView,
+)
+async def accept_workspace_knowledge_rule(
+    trip_id: UUID,
+    rule_id: UUID,
+    request: AcceptKnowledgeRuleRequest,
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        if request.expected_base_version != state.state_version:
+            raise HTTPException(status_code=409, detail="workspace state version conflict")
+        rule = next((item for item in state.knowledge_rules if item.rule_id == rule_id), None)
+        if rule is None:
+            raise HTTPException(status_code=404, detail="Knowledge rule was not found")
+        try:
+            active_rule = accept_derived_rule(rule)
+            document_id = state.knowledge_evidence_documents[rule.evidence_ids[0]]
+        except (KeyError, ValueError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        with_active_rule = state.model_copy(
+            update={
+                "knowledge_rules": tuple(
+                    active_rule if item.rule_id == rule_id else item
+                    for item in state.knowledge_rules
+                )
+            }
+        )
+        patch = PlanPatch(
+            trip_id=trip_id,
+            expected_base_version=state.state_version,
+            operations=(KnowledgeOperation(action="attach", document_id=document_id),),
+            rationale=f"Accept derived knowledge rule {rule_id}.",
+            requires_confirmation=True,
+            idempotency_key=request.idempotency_key,
+            created_at=datetime.now(UTC),
+        )
+        try:
+            proposed, preview = agent.propose_patch(with_active_rule, patch)
+            updated = await agent.apply_patch(
+                proposed, preview.patch.patch_id, confirm=request.confirm
+            )
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_knowledge_rule_accepted")
+    return workspace_view(updated)
+
+
+@app.post(
+    "/api/workspaces/{trip_id}/knowledge/rules/{rule_id}/deactivate",
+    response_model=WorkspaceView,
+)
+async def deactivate_workspace_knowledge_rule(
+    trip_id: UUID,
+    rule_id: UUID,
+    request: WorkspaceMutationRequest,
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            updated = agent.deactivate_knowledge_rule(state, request, rule_id)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_knowledge_rule_deactivated")
+    return workspace_view(updated)
+
+
+@app.delete(
+    "/api/workspaces/{trip_id}/knowledge/rules/{rule_id}",
+    response_model=WorkspaceView,
+)
+async def delete_workspace_knowledge_rule(
+    trip_id: UUID,
+    rule_id: UUID,
+    request: WorkspaceMutationRequest,
+) -> WorkspaceView:
+    async with _workspace_runtime() as (agent, store):
+        state = await _load_workspace(store, request.owner_user_id, request.thread_id, trip_id)
+        try:
+            updated = agent.delete_knowledge_rule(state, request, rule_id)
+        except ValueError as error:
+            raise _workspace_value_error(error) from error
+        await _save_workspace(store, updated, "workspace_knowledge_rule_deleted")
+    return workspace_view(updated)
 
 
 @app.post("/api/workflows", response_model=WorkflowResponse)
@@ -271,11 +1713,97 @@ async def start_workflow(request: StartWorkflowRequest) -> WorkflowResponse:
         "trip_id": str(request.trip_id),
         "request_summary": request.request_summary,
     }
+    if request.requirements is not None:
+        initial["requirements"] = cast(
+            dict[str, object], request.requirements.model_dump(mode="json")
+        )
     async with _workflow_runtime() as (graph, store):
+        if request.apply_saved_preferences:
+            preferences = await store.list_preferences(request.owner_user_id)
+            allowed = {
+                "budget_level",
+                "walking_preference",
+                "max_walking_meters_per_day",
+            }
+            initial["preference_defaults"] = {
+                item.preference_key: item.value.get("value")
+                for item in preferences
+                if item.preference_key in allowed and "value" in item.value
+            }
         result = cast(WorkflowState, await graph.ainvoke(initial, config))
         response = _workflow_response(result)
         await _save_workflow(store, request.owner_user_id, response)
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            response.trip_id,
+            ConversationEventPayload(
+                role="user",
+                content=request.request_summary,
+                intent=ConversationIntent.TRIP_STARTED,
+            ),
+        )
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            response.trip_id,
+            ConversationEventPayload(
+                role="assistant",
+                content=(
+                    "我已建立这次行程的持续对话。当前事实、确认进度和后续修改都会"
+                    "绑定在这个行程中; 关键选择仍需要你在可见卡片中明确确认。"
+                ),
+                intent=ConversationIntent.TRIP_STARTED,
+                action=ConversationAction(
+                    kind=(
+                        "confirmation_required"
+                        if response.pending_confirmation is not None
+                        else "none"
+                    )
+                ),
+            ),
+        )
     return response
+
+
+@app.get("/api/preferences", response_model=tuple[StoredPreference, ...])
+async def list_preferences(
+    owner_user_id: str = Query(min_length=1, max_length=120),
+) -> tuple[StoredPreference, ...]:
+    async with _project_store() as store:
+        return tuple(await store.list_preferences(owner_user_id))
+
+
+@app.put("/api/preferences/{preference_key}", response_model=StoredPreference)
+async def save_preference(
+    preference_key: Literal[
+        "budget_level",
+        "walking_preference",
+        "max_walking_meters_per_day",
+    ],
+    request: PreferenceWriteRequest,
+) -> StoredPreference:
+    normalized = getattr(
+        TripRequest.model_validate({preference_key: request.value}), preference_key
+    )
+    preference = StoredPreference(
+        owner_user_id=request.owner_user_id,
+        preference_key=preference_key,
+        value={"value": normalized},
+        explicit_consent=request.explicit_consent,
+    )
+    async with _project_store() as store:
+        await store.save_preference(preference)
+    return preference
+
+
+@app.delete("/api/preferences", response_model=PreferenceDeleteResponse)
+async def delete_preferences(
+    owner_user_id: str = Query(min_length=1, max_length=120),
+) -> PreferenceDeleteResponse:
+    async with _project_store() as store:
+        deleted = await store.delete_preferences(owner_user_id)
+    return PreferenceDeleteResponse(deleted_count=deleted)
 
 
 @app.post("/api/workflows/{trip_id}/resume", response_model=WorkflowResponse)
@@ -311,9 +1839,139 @@ async def get_workflow(
     return WorkflowResponse.model_validate(trip.state)
 
 
+@app.get(
+    "/api/workflows/{trip_id}/messages",
+    response_model=tuple[ConversationMessage, ...],
+)
+async def list_workflow_messages(
+    trip_id: UUID,
+    owner_user_id: str = Query(min_length=1, max_length=120),
+    thread_id: str = Query(min_length=1, max_length=120),
+) -> tuple[ConversationMessage, ...]:
+    async with _project_store() as store:
+        trip = await store.get_trip(owner_user_id, thread_id, trip_id)
+        if trip is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Workflow was not found in this namespace",
+            )
+        return await _list_conversation_messages(store, owner_user_id, trip_id)
+
+
+@app.post(
+    "/api/workflows/{trip_id}/messages",
+    response_model=ConversationResponse,
+)
+async def converse_workflow(trip_id: UUID, request: ConversationRequest) -> ConversationResponse:
+    async with _conversation_runtime() as (responder, store):
+        trip = await store.get_trip(request.owner_user_id, request.thread_id, trip_id)
+        if trip is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Workflow was not found in this namespace",
+            )
+        current = WorkflowResponse.model_validate(trip.state)
+        await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            trip_id,
+            ConversationEventPayload(
+                role="user",
+                content=request.message,
+                intent=ConversationIntent.GENERAL,
+            ),
+        )
+        prompt_window = await _conversation_prompt_window(
+            store, request.owner_user_id, trip_id
+        )
+        decision = await responder.respond(
+            context_from_workflow(current),
+            prompt_window.recent_messages[:-1],
+            request.message,
+            memory_summary=prompt_window.summary,
+            critical_decisions=prompt_window.critical_decisions,
+        )
+        workflow = current
+        content = decision.answer
+        action = ConversationAction()
+        intent = decision.intent
+        if decision.modification is not None:
+            try:
+                workflow = _modified_workflow(current, decision.modification)
+            except ValueError as error:
+                intent = ConversationIntent.UNSUPPORTED_CHANGE
+                action = ConversationAction(kind="unsupported_change")
+                if "three-revision" in str(error):
+                    content = "这次行程已达到三轮局部修订上限; 我没有继续改动计划。"
+                elif "editable itinerary" in str(error):
+                    content = (
+                        "当前还没有可修改的 Route B。完成必要确认并生成计划后, "
+                        "我才能执行局部重规划。"
+                    )
+                else:
+                    content = f"这项修改无法安全执行: {error}。当前计划保持不变。"
+            else:
+                await _save_workflow(store, request.owner_user_id, workflow)
+                action = ConversationAction(
+                    kind="workflow_modified",
+                    target_day=decision.modification.target_day,
+                    revision_count=workflow.revision_count,
+                )
+                content = (
+                    f"{decision.answer} 已应用为计划版本 {workflow.revision_count + 1}; "
+                    "请复核变化后的步行距离和遗漏点。"
+                )[:2000]
+        elif decision.intent in {
+            ConversationIntent.CONFIRMATION_HELP,
+            ConversationIntent.UNSUPPORTED_CHANGE,
+        }:
+            action = ConversationAction(
+                kind=(
+                    "confirmation_required"
+                    if decision.intent is ConversationIntent.CONFIRMATION_HELP
+                    else "unsupported_change"
+                )
+            )
+        assistant = await _append_conversation_message(
+            store,
+            request.owner_user_id,
+            trip_id,
+            ConversationEventPayload(
+                role="assistant",
+                content=content,
+                intent=intent,
+                action=action,
+            ),
+        )
+        messages = await _list_conversation_messages(store, request.owner_user_id, trip_id)
+        return ConversationResponse(
+            trip_id=trip_id,
+            messages=messages,
+            assistant_message=assistant,
+            workflow=workflow,
+        )
+
+
+@app.post("/api/workflows/{trip_id}/modify", response_model=WorkflowResponse)
+async def modify_workflow(trip_id: UUID, request: ModifyWorkflowRequest) -> WorkflowResponse:
+    async with _project_store() as store:
+        trip = await store.get_trip(request.owner_user_id, request.thread_id, trip_id)
+        if trip is None:
+            raise HTTPException(status_code=404, detail="Workflow was not found in this namespace")
+        current = WorkflowResponse.model_validate(trip.state)
+        try:
+            modification = parse_local_modification(request.instruction)
+            response = _modified_workflow(current, modification)
+        except ValueError as error:
+            status = 409 if "Workflow" in str(error) or "revision" in str(error) else 422
+            raise HTTPException(status_code=status, detail=str(error)) from error
+        await _save_workflow(store, request.owner_user_id, response)
+    return response
+
+
 @app.post("/api/knowledge/documents", response_model=IngestedDocument)
 async def create_knowledge_document(request: KnowledgeDocumentInput) -> IngestedDocument:
-    ingested = ingest_document(request, FixtureE5Embedder())
+    ingested = ingest_document(request, _rag_embedder())
     async with _knowledge_repository() as repository:
         return await repository.save(ingested)
 

@@ -6,7 +6,15 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP_DIRS = {".git", ".venv", ".tmp", "node_modules", "dist", "playwright-report"}
+SKIP_DIRS = {
+    ".codex-tmp",
+    ".git",
+    ".venv",
+    ".tmp",
+    "node_modules",
+    "dist",
+    "playwright-report",
+}
 SKIP_FILES = {".env"}
 TEXT_SUFFIXES = {
     "",

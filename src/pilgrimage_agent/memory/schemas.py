@@ -1,6 +1,6 @@
 """Strict schemas for project-owned memory records."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from pydantic import Field
@@ -21,6 +21,7 @@ class StoredEvent(StrictModel):
     owner_user_id: str
     event_type: str = Field(min_length=1, max_length=80)
     payload: dict[str, object]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class StoredPreference(StrictModel):

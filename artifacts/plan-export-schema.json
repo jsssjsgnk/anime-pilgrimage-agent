@@ -85,6 +85,20 @@
           "default": null,
           "title": "Confirmation Url"
         },
+        "comparison_labels": {
+          "default": [],
+          "items": {
+            "enum": [
+              "recommended",
+              "fastest",
+              "cheapest",
+              "fewest_transfers"
+            ],
+            "type": "string"
+          },
+          "title": "Comparison Labels",
+          "type": "array"
+        },
         "provenance": {
           "$ref": "#/$defs/DataProvenance"
         }

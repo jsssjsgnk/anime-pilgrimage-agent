@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pilgrimage_agent.persistence import KnowledgeChunkRecord, KnowledgeRecord
 from pilgrimage_agent.rag.bm25 import PersistentBm25Index
 from pilgrimage_agent.rag.embedding import EmbeddingProvider
-from pilgrimage_agent.rag.retrieval import allowed_namespaces, rrf_fuse
+from pilgrimage_agent.rag.retrieval import allowed_namespaces, detect_conflicts, rrf_fuse
 from pilgrimage_agent.rag.schemas import (
     IngestedDocument,
     KnowledgeChunk,
@@ -244,15 +244,11 @@ class SqlRagRepository:
         chunks = [chunk for chunk, _document_item in pairs]
         documents = {document.document_id: document for _chunk_item, document in pairs}
         chunk_map = {chunk.chunk_id: chunk for chunk in chunks}
-        dense_ids = [
-            chunk_id
-            for chunk_id in dense_records
-            if len(query_tokens.intersection(chunk_map[chunk_id].lexical_tokens)) >= 2
-        ]
+        dense_ids = list(dense_records)
         bm25_ids = [
             chunk_id
             for chunk_id in self.bm25.search(chunks, tuple(sorted(query_tokens)))
-            if len(query_tokens.intersection(chunk_map[chunk_id].lexical_tokens)) >= 2
+            if query_tokens.intersection(chunk_map[chunk_id].lexical_tokens)
         ]
         fused = rrf_fuse(dense_ids, bm25_ids)
         ranked = sorted(fused, key=lambda chunk_id: fused[chunk_id][0], reverse=True)
@@ -288,9 +284,11 @@ class SqlRagRepository:
             per_document[document.document_id] += 1
             if len(evidence) == query.top_k:
                 break
+        conflicts = detect_conflicts(evidence, documents)
         return KnowledgeSearchResult(
             status="sufficient_evidence" if evidence else "insufficient_evidence",
             evidence=tuple(evidence),
+            conflicts=conflicts,
         )
 
     @staticmethod

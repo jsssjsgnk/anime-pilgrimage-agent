@@ -15,12 +15,15 @@ EXPECTED_TOOLS = [
     "fetch_pilgrimage_points",
     "geocode_place",
     "get_anime_subject",
+    "get_place_facts",
     "get_route_directions",
     "get_route_matrix",
     "get_weather_forecast",
     "search_anime_subjects",
     "search_flexible_flight_dates",
     "search_flight_options",
+    "search_place_facts",
+    "search_transit_options",
 ]
 
 
@@ -33,7 +36,7 @@ async def inspect(url: str) -> list[dict[str, Any]]:
             snapshot = [tool.model_dump(mode="json") for tool in tools.tools]
             names = sorted(tool["name"] for tool in snapshot)
             if names != EXPECTED_TOOLS:
-                raise RuntimeError("MCP allowlist differs from the expected nine read-only tools")
+                raise RuntimeError("MCP allowlist differs from the expected read-only tools")
             for tool in snapshot:
                 schema = tool.get("inputSchema")
                 if not isinstance(schema, dict) or schema.get("type") != "object":
@@ -49,7 +52,7 @@ def main() -> int:
         print(canonical)
     else:
         digest = hashlib.sha256(canonical.encode()).hexdigest()[:16]
-        print(f"MCP initialize/tools-list passed with 9 read-only tools; schema digest {digest}")
+        print(f"MCP initialize/tools-list passed with 12 read-only tools; schema digest {digest}")
     return 0
 
 

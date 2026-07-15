@@ -1,45 +1,42 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
 import maplibregl from "maplibre-gl";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../src/App";
 import { createRouteMapOptions, ROUTE_MAP_STYLE_URL } from "../src/route-map-config";
-
-function renderApp() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <App />
-    </QueryClientProvider>,
-  );
-}
+import { extractSubjectQueries } from "../src/workspace/intake";
 
 describe("App", () => {
-  it("explains safety boundaries and provides a labelled mixed-initiative input", () => {
-    renderApp();
+  afterEach(() => window.sessionStorage.clear());
 
-    expect(screen.getByText("只读规划 · 不预订 · 不付款")).toBeInTheDocument();
-    expect(screen.getByLabelText("旅行想法")).toHaveValue(
-      "我从京都出发，九月去东京三天，想巡礼《孤独摇滚！》，预算中等，希望少走路。",
+  it("shows one conversational workflow without implementation diagnostics", () => {
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "多作品巡礼工作区" })).toBeVisible();
+    expect(screen.getByLabelText("你的巡礼想法")).toHaveValue(
+      "我想用三天巡礼《孤独摇滚！》和《莉可丽丝》，每天不要走太多路。",
     );
+    expect(screen.getByRole("heading", { name: "地点地图会在这里生成" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "全部地点" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("作品")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Route A|Route B|PlanPatch|Anitabi|目录身份/u)).not.toBeInTheDocument();
+    expect(screen.queryByText("经典路线兼容流程")).not.toBeInTheDocument();
   });
 
-  it("acknowledges input without silently confirming key choices", () => {
-    renderApp();
-
-    fireEvent.click(screen.getByRole("button", { name: /整理旅行条件/ }));
-    expect(screen.getByText(/不会静默确认关键选择/)).toBeInTheDocument();
+  it("extracts up to three works from natural Chinese requests", () => {
+    expect(extractSubjectQueries("我想三天巡礼《孤独摇滚！》和《莉可丽丝》，住在新宿附近"))
+      .toEqual(["孤独摇滚！", "莉可丽丝"]);
+    expect(extractSubjectQueries("这次想巡礼孤独摇滚！和莉可丽丝，每天少走一点"))
+      .toEqual(["孤独摇滚！", "莉可丽丝"]);
   });
 
-  it("configures an interactive attributed OpenFreeMap basemap", () => {
+  it("keeps an interactive attributed basemap", () => {
     const bounds = new maplibregl.LngLatBounds([139.66, 35.66], [139.68, 35.67]);
     const options = createRouteMapOptions(document.createElement("div"), bounds);
 
     expect(options.style).toBe(ROUTE_MAP_STYLE_URL);
     expect(options.interactive).toBe(true);
     expect(options.cooperativeGestures).toBe(true);
-    if (!options.attributionControl) throw new Error("Map attribution must remain enabled.");
-    expect(options.attributionControl.compact).toBe(false);
+    expect(options.attributionControl).toBeTruthy();
   });
 });

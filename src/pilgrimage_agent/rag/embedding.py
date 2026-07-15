@@ -88,3 +88,27 @@ class SentenceTransformerE5Embedder:
     def token_count(self, text: str) -> int:
         encoded = self.model.tokenizer(text, add_special_tokens=True, truncation=False)
         return len(cast(dict[str, list[int]], encoded)["input_ids"])
+
+
+class LazySentenceTransformerE5Embedder:
+    """Production real-E5 boundary that defers model initialization until retrieval."""
+
+    dimension = 384
+    model_revision = "intfloat/multilingual-e5-small"
+
+    def __init__(self) -> None:
+        self._delegate: SentenceTransformerE5Embedder | None = None
+
+    def _model(self) -> SentenceTransformerE5Embedder:
+        if self._delegate is None:
+            self._delegate = SentenceTransformerE5Embedder()
+        return self._delegate
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        return self._model().embed_query(text)
+
+    def embed_passages(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+        return self._model().embed_passages(texts)
+
+    def token_count(self, text: str) -> int:
+        return self._model().token_count(text)

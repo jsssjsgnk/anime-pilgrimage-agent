@@ -27,14 +27,24 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://pilgrimage:pilgrimage@postgres:5432/pilgrimage
+      PROVIDER_MODE: ${PROVIDER_MODE:-fixture}
+      BANGUMI_MODE: ${BANGUMI_MODE:-live}
+      BANGUMI_USER_AGENT: "${BANGUMI_USER_AGENT:-anime-pilgrimage-agent/0.1 (contact: local-development)}"
+      PILGRIMAGE_POINT_MODE: ${PILGRIMAGE_POINT_MODE:-anitabi}
       RAG_BM25_INDEX_DIR: /app/data/rag-bm25
+      RAG_EMBEDDING_MODE: real
+      HF_HOME: /app/data/huggingface
+      MCP_TOOLS_URL: http://mcp-tools:8001/mcp
     volumes:
       - pilgrimage-rag-index:/app/data/rag-bm25
+      - pilgrimage-hf-cache:/app/data/huggingface
     command: ["sh", "-c", "alembic upgrade head && uvicorn pilgrimage_agent.api.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      mcp-tools:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
@@ -52,6 +62,10 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://pilgrimage:pilgrimage@postgres:5432/pilgrimage
+      PROVIDER_MODE: ${PROVIDER_MODE:-fixture}
+      BANGUMI_MODE: ${BANGUMI_MODE:-live}
+      BANGUMI_USER_AGENT: "${BANGUMI_USER_AGENT:-anime-pilgrimage-agent/0.1 (contact: local-development)}"
+      PILGRIMAGE_POINT_MODE: ${PILGRIMAGE_POINT_MODE:-anitabi}
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,6 +97,8 @@ volumes:
     name: anime-pilgrimage-agent-postgres
   pilgrimage-rag-index:
     name: anime-pilgrimage-agent-rag-index
+  pilgrimage-hf-cache:
+    name: anime-pilgrimage-agent-hf-cache
 
 networks:
   frontend:

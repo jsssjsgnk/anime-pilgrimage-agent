@@ -1,0 +1,98 @@
+{
+  "generated_at": "2026-07-15T08:18:15.438865+00:00",
+  "status": "PASS",
+  "checks": [
+    {
+      "name": "truthful provider runtime",
+      "passed": true,
+      "evidence": "Compose diagnostics: Anitabi live; other configured providers fixture."
+    },
+    {
+      "name": "remediation domain and behavior suite",
+      "passed": true,
+      "evidence": "Typed domain, API, clustering, planning, patch, replanner, RAG-rule tests."
+    },
+    {
+      "name": "real desktop and mobile workspace evidence",
+      "passed": true,
+      "evidence": "Browser path captured at 1440x900 and 375x812 with no horizontal overflow."
+    },
+    {
+      "name": "normalized PostgreSQL workspace projection",
+      "passed": true,
+      "evidence": "Real PostgreSQL projection rows are inserted, verified, and cleaned."
+    },
+    {
+      "name": "SQL real-E5 RAG production loop",
+      "passed": true,
+      "evidence": "Real E5 + pgvector conflict, isolation, deletion refresh, injection safety."
+    },
+    {
+      "name": "Alembic remediation head",
+      "passed": true,
+      "evidence": "Running Compose database reports the additive remediation migration head."
+    },
+    {
+      "name": "mixed-workspace Web tests",
+      "passed": true,
+      "evidence": "Single-workspace start, confirmation, planning, patch, pending recovery, and compatibility tests."
+    }
+  ],
+  "scenarios": {
+    "A": {
+      "name": "truthful runtime",
+      "status": "PASS",
+      "mode": "fixture + live diagnostics"
+    },
+    "B": {
+      "name": "multi-subject evidence",
+      "status": "PASS",
+      "mode": "unit/API + live Anitabi browser"
+    },
+    "C": {
+      "name": "scene-to-place resolution",
+      "status": "PASS",
+      "mode": "deterministic unit/API"
+    },
+    "D": {
+      "name": "real area clustering",
+      "status": "PASS",
+      "mode": "Haversine DBSCAN unit/API"
+    },
+    "E": {
+      "name": "hierarchical alternatives",
+      "status": "PASS",
+      "mode": "deterministic unit/API"
+    },
+    "F": {
+      "name": "PlanPatch and recovery",
+      "status": "PASS",
+      "mode": "API/Web/browser"
+    },
+    "G": {
+      "name": "violation-specific replanning",
+      "status": "PASS",
+      "mode": "six-fixture unit gate"
+    },
+    "H": {
+      "name": "production RAG loop",
+      "status": "PASS",
+      "mode": "SQL + real E5 Compose smoke"
+    },
+    "I": {
+      "name": "mixed-initiative workspace",
+      "status": "PASS",
+      "mode": "desktop/mobile browser"
+    },
+    "J": {
+      "name": "legacy migration",
+      "status": "PASS",
+      "mode": "unit + Alembic"
+    }
+  },
+  "limitations": [
+    "SearchAPI live quota was not exercised; its external proof remains UNVERIFIED.",
+    "Area travel-time correction is estimated/Haversine when ORS is unavailable.",
+    "Local owner identity is request-scoped; production authentication remains a deployment concern."
+  ]
+}

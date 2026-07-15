@@ -14,7 +14,7 @@ from pilgrimage_agent.domain.models import (
     SubjectSearchQuery,
     SubjectSearchResult,
 )
-from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind, missing_credential
+from pilgrimage_agent.providers.base import ProviderError, ProviderErrorKind
 from pilgrimage_agent.providers.cache import MemoryProviderCache, request_fingerprint
 from pilgrimage_agent.providers.common import provenance
 from pilgrimage_agent.providers.http import SafeHttpClient
@@ -57,13 +57,13 @@ class BangumiSubjectProvider:
         self.cache: MemoryProviderCache[SubjectSearchResult] = MemoryProviderCache()
 
     def _headers(self) -> dict[str, str]:
-        if not self.token:
-            raise missing_credential(self.provider, "BANGUMI_ACCESS_TOKEN")
-        return {
-            "Authorization": f"Bearer {self.token}",
+        headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json",
         }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
 
     async def fetch(self, query: SubjectSearchQuery) -> SubjectSearchResult:
         fingerprint = request_fingerprint(self.provider, query)
@@ -75,7 +75,11 @@ class BangumiSubjectProvider:
             f"{BANGUMI_BASE_URL}/v0/search/subjects",
             headers=self._headers(),
             params={"limit": query.limit, "offset": 0},
-            json_body={"keyword": query.query, "sort": "match"},
+            json_body={
+                "keyword": query.query,
+                "sort": "match",
+                "filter": {"type": [2]},
+            },
         )
         try:
             payload = _DICT.validate_python(raw)
@@ -178,6 +182,21 @@ class FixtureBangumiSubjectProvider:
             aliases=("Bocchi the Rock!",),
             provenance=prov,
         )
+        lycoris_provenance = provenance(
+            self.provider,
+            "https://bgm.tv/subject/364450",
+            ttl=timedelta(days=365),
+        )
+        self.subjects = {
+            self.subject.subject_id: self.subject,
+            "364450": ConfirmedSubject(
+                subject_id="364450",
+                name="Lycoris Recoil",
+                name_cn="莉可丽丝",
+                aliases=("Lycoris Recoil",),
+                provenance=lycoris_provenance,
+            ),
+        }
 
     async def fetch(self, query: SubjectSearchQuery) -> SubjectSearchResult:
         candidates: tuple[SubjectCandidate, ...] = ()
@@ -190,16 +209,25 @@ class FixtureBangumiSubjectProvider:
                     provenance=self.subject.provenance,
                 ),
             )
+        elif any(term in normalized for term in ("莉可丽丝", "lycoris")):
+            subject = self.subjects["364450"]
+            candidates = (
+                SubjectCandidate(
+                    **subject.model_dump(exclude={"provenance"}),
+                    score=8.2,
+                    provenance=subject.provenance,
+                ),
+            )
         return SubjectSearchResult(
             candidates=candidates[: query.limit],
             provenance=self.subject.provenance,
         )
 
     async def get_subject(self, subject_id: str) -> ConfirmedSubject:
-        if subject_id != self.subject.subject_id:
+        if subject_id not in self.subjects:
             raise ProviderError(
                 ProviderErrorKind.NOT_FOUND,
                 self.provider,
                 "The fixture subject was not found.",
             )
-        return self.subject
+        return self.subjects[subject_id]

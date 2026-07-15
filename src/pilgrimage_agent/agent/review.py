@@ -32,7 +32,7 @@ class FixtureReviewer:
     def __init__(self, *, always_revise: bool = False) -> None:
         self.always_revise = always_revise
 
-    def review(self, request: ReviewerInput) -> ReviewerOutput:
+    async def review(self, request: ReviewerInput) -> ReviewerOutput:
         if self.always_revise or request.deterministic_violations:
             return ReviewerOutput(
                 action="revise",

@@ -92,6 +92,7 @@ PHASE_2 = (
             "uv",
             "run",
             "pytest",
+            "tests/contract/test_anitabi_static.py",
             "tests/contract/test_phase2_providers.py",
             "tests/unit",
             "--cov=pilgrimage_agent",
@@ -217,6 +218,8 @@ PHASE_4 = (
             "tests/unit/test_phase4_graph.py",
             "tests/unit/test_phase4_context_review.py",
             "tests/unit/test_phase4_memory.py",
+            "tests/unit/test_workspace_graph.py",
+            "tests/unit/test_workspace_api.py",
         ),
         "fixture",
     ),
@@ -241,6 +244,11 @@ PHASE_4 = (
     Check(
         "Checkpoint resume after API restart",
         ("uv", "run", "python", "scripts/phase4_api_smoke.py"),
+        "integration",
+    ),
+    Check(
+        "Workspace clear and transactional deletion",
+        ("uv", "run", "python", "scripts/workspace_deletion_smoke.py"),
         "integration",
     ),
     Check(
@@ -664,7 +672,8 @@ def write_final_verification(*, overall_verified: bool) -> None:
         "- `artifacts/screenshots/phase-5-desktop.png`",
         "- `artifacts/screenshots/phase-5-mobile.png`",
         "- Serialized Playwright acceptance covers request, confirmation, access/base, "
-        "planning, local revision stability, evidence, and all three exports.",
+        "planning, local revision stability, persistent conversational replanning/reload "
+        "recovery, evidence, and all three exports.",
         "",
         "## Known limitations",
         "",
@@ -672,8 +681,11 @@ def write_final_verification(*, overall_verified: bool) -> None:
         "- Scanned PDFs require external OCR; the MVP returns `needs_ocr`.",
         "- Initial official E5 model download is an operator prerequisite; "
         "subsequent smoke is offline.",
-        "- Fixture point import replaces unauthorized scraping; "
-        "this is not a deployed multi-tenant service.",
+        "- Anitabi may expose fewer documented detail records than `/lite` advertises; "
+        "Route A remains explicitly partial and does not use undocumented scraping.",
+        "- Workspace modification is bounded to validated PlanPatch operations; material "
+        "changes require explicit confirmation.",
+        "- This is a local Compose service without a production identity provider or HA setup.",
         "- Complete details: `docs/KNOWN_LIMITATIONS.md`.",
         "",
         "No deployment, booking, payment, purchase, or external message was performed.",

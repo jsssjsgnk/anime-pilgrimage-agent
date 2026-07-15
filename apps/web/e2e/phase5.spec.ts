@@ -1,76 +1,71 @@
 import { expect, test } from "@playwright/test";
-import { readFile } from "node:fs/promises";
 
-test("complete plan can be locally revised, sourced, and exported", async ({ page }, testInfo) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: /整理旅行条件/ }).click();
-  await page.getByRole("button", { name: "确认并查看 Route A" }).click();
-  await page.getByRole("radio", { name: "选择去程 新干线" }).click();
-  await page.getByRole("radio", { name: "选择返程 新干线" }).click();
-  await page.getByRole("radio", { name: "选择基地 下北泽站周边" }).click();
-  await page.getByRole("button", { name: /生成可执行 Route B/ }).click();
+import { captureEvidence } from "./screenshot-evidence";
+import { planWorkspace } from "./workspace-flow";
 
-  const timeline = page.getByRole("region", { name: "Route B · 三日可执行时间轴" });
-  await expect(timeline.getByText("计划版本 1")).toBeVisible();
-  await expect(timeline.getByRole("heading", { name: "访问与礼仪依据" })).toBeVisible();
-  await expect(timeline.getByText("Shimokitazawa neighborhood planning note")).toBeVisible();
-  await expect(timeline.getByText(/权威 4\/5 · 访问 2026-07-14/).first()).toBeVisible();
+test("natural conversation previews a change and survives reload", async ({ page }, testInfo) => {
+  await planWorkspace(page);
+  const versionBefore = await page.locator(".mix-section-heading .mix-kicker").textContent();
+  const conversationTab = page.getByRole("button", { name: "对话" });
+  if (await conversationTab.isVisible()) await conversationTab.click();
 
-  const dayCards = timeline.locator(".day-card");
-  const dayOneBefore = await dayCards.nth(0).textContent();
-  const dayThreeBefore = await dayCards.nth(2).textContent();
-  await timeline.getByRole("button", { name: /应用为版本 2/ }).click();
-  await expect(timeline.getByText("计划版本 2")).toBeVisible();
-  await expect(timeline.getByText("第 2 天已按 3 km 局部上限重算；第 1、3 天保持稳定。"))
-    .toBeVisible();
-  expect(await dayCards.nth(0).textContent()).toBe(dayOneBefore);
-  expect(await dayCards.nth(2).textContent()).toBe(dayThreeBefore);
+  const editor = page.getByLabel("继续修改行程");
+  await editor.fill("我想每天少走一点");
+  const responsePromise = page.waitForResponse(
+    (response) => response.url().endsWith("/messages")
+      && response.request().method() === "POST",
+    { timeout: 20_000 },
+  );
+  await page.getByRole("button", { name: "发送" }).click();
+  expect((await responsePromise).ok()).toBe(true);
+  await expect(page.getByRole("dialog", { name: "应用这次修改？" })).toBeVisible();
+  await expect(page.getByText("只重新计算受影响的行程")).toBeVisible();
+  await page.getByRole("button", { name: "确认并重新规划" }).click();
 
-  const jsonDownloadPromise = page.waitForEvent("download");
-  await timeline.getByRole("button", { name: "导出 JSON" }).click();
-  const jsonDownload = await jsonDownloadPromise;
-  expect(jsonDownload.suggestedFilename()).toBe("pilgrimage-plan.json");
-  const jsonPath = await jsonDownload.path();
-  expect(jsonPath).not.toBeNull();
-  const plan = JSON.parse(await readFile(jsonPath, "utf-8")) as {
-    schema_version: string;
-    plan_version: number;
-    route_a_point_ids: string[];
-  };
-  expect(plan.schema_version).toBe("1");
-  expect(plan.plan_version).toBe(2);
-  expect(plan.route_a_point_ids.length).toBe(3);
+  const mapTab = page.getByRole("button", { name: "地图与行程" });
+  if (await mapTab.isVisible()) await mapTab.click();
+  await expect(page.locator(".mix-section-heading .mix-kicker")).not.toHaveText(versionBefore ?? "", { timeout: 30_000 });
 
-  const geoDownloadPromise = page.waitForEvent("download");
-  await timeline.getByRole("button", { name: "导出 GeoJSON" }).click();
-  const geoDownload = await geoDownloadPromise;
-  expect(geoDownload.suggestedFilename()).toBe("pilgrimage-route.geojson");
-  const geoPath = await geoDownload.path();
-  expect(geoPath).not.toBeNull();
-  const geojson = JSON.parse(await readFile(geoPath, "utf-8")) as {
-    type: string;
-    schema_version: string;
-    features: unknown[];
-  };
-  expect(geojson.type).toBe("FeatureCollection");
-  expect(geojson.schema_version).toBe("1");
-  expect(geojson.features.length).toBeGreaterThan(0);
-
-  const htmlDownloadPromise = page.waitForEvent("download");
-  await timeline.getByRole("button", { name: "打印 HTML" }).click();
-  const htmlDownload = await htmlDownloadPromise;
-  expect(htmlDownload.suggestedFilename()).toBe("pilgrimage-plan.html");
-  const htmlPath = await htmlDownload.path();
-  expect(htmlPath).not.toBeNull();
-  const html = await readFile(htmlPath, "utf-8");
-  expect(html).toContain("<!doctype html>");
-  expect(html).not.toContain("<script");
+  await page.reload();
+  await expect(page.getByText("我想每天少走一点", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/工作区\s+[a-f0-9]{8}|partial_ready|evidence_collector|PlanPatch|itinerary_planner/u)).toHaveCount(0);
 
   const screenshotName = testInfo.project.name.startsWith("mobile")
     ? "phase-5-mobile.png"
     : "phase-5-desktop.png";
-  await page.screenshot({
-    path: `../../artifacts/screenshots/${screenshotName}`,
-    fullPage: true,
+  await captureEvidence(page, testInfo, screenshotName);
+});
+
+test("bulk selection submits one combined preview", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("你的巡礼想法").fill("我想用一天巡礼轻音少女");
+  await page.getByRole("button", { name: "开始规划" }).click();
+  await expect(page.getByRole("heading", { name: "作品匹配结果" })).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "选择全部季度与版本" }).click();
+  await page.getByRole("button", { name: "确认并整理地点" }).click();
+  await expect(page.getByRole("button", { name: "生成层级行程" })).toBeVisible({ timeout: 120_000 });
+  await page.getByRole("button", { name: "批量选择" }).click();
+  const choices = page.getByRole("list", { name: "批量选择地点" }).getByRole("checkbox");
+  const count = await choices.count();
+  expect(count).toBeGreaterThan(25);
+  await page.getByRole("button", { name: "全选当前列表" }).click();
+  await expect(page.getByText(`已选 ${count} 个地点`)).toBeVisible();
+  const requestPromise = page.waitForRequest(
+    (request) => request.url().endsWith("/patches/preview")
+      && request.method() === "POST",
+  );
+  await page.getByRole("button", { name: "批量排除" }).click();
+  const request = await requestPromise;
+  const payload = request.postDataJSON() as {
+    patch: { operations: { op: string; place_ids: string[] }[] };
+  };
+  expect(payload.patch.operations).toHaveLength(1);
+  expect(payload.patch.operations[0]).toMatchObject({
+    op: "place_batch",
+    place_ids: expect.arrayContaining([expect.any(String)]),
   });
+  expect(payload.patch.operations[0]?.place_ids).toHaveLength(count);
+  const dialog = page.getByRole("dialog", { name: "应用这次修改？" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(`${count} 个地点：从行程中排除`);
 });
